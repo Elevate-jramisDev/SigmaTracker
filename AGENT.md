@@ -7,28 +7,38 @@
 - Utiliza React (JSX) y Vite para desarrollo rápido y recarga en caliente.
 - El punto de entrada es `src/main.jsx`, que monta el componente principal `App.jsx`.
 - `App.jsx` gestiona la lógica de visualización y consumo de la API.
+- El cálculo de P&L (Profit & Loss) se realiza en el frontend, agrupando operaciones por mercado y outcome, y calculando el beneficio al cerrar posiciones (venta).
+- Se muestra el precio medio de entrada (`entryPrice`) y el P&L de cada trade cerrado.
 
 ### 2. Backend/API
 - Ubicado en `api/`.
 - El archivo principal es `api/trades.js`, que expone endpoints para obtener datos de trades desde Polymarket.
-- La API puede ser consumida tanto por el frontend como por otros servicios.
+- La API actúa como proxy y no realiza cálculos de P&L, solo retorna los datos crudos de Polymarket.
 
 ### 3. Configuración y despliegue
 - `vite.config.js` configura el entorno de desarrollo y build.
 - `vercel.json` permite el despliegue automático en Vercel, incluyendo rutas para la API.
 
-## Optimización para uso de IA
+## Optimización para IA
+- La lógica de agrupación y cálculo de P&L está centralizada en `computePnL` en el frontend.
+- Para optimizar el uso de IA, se recomienda estructurar los datos de entrada (trades) de forma consistente, asegurando que los campos `side`, `size`, `price`, `market`, `outcome` estén presentes y normalizados.
+- Si se desea delegar el cálculo de P&L a la IA, proporcionar siempre el historial completo de operaciones ordenado por fecha.
+- Para análisis avanzados (predicción, clustering, etc.), exportar los datos en formato JSON estructurado.
 
-- **Separación clara de responsabilidades:** El frontend y la API están desacoplados, facilitando la extensión o integración de agentes inteligentes.
-- **Estructura modular:** Permite añadir fácilmente nuevos endpoints, componentes o lógica de IA.
-- **Documentación y convenciones:** El código sigue convenciones estándar de React y Node.js, facilitando la comprensión y modificación por agentes automáticos.
-- **Puntos de integración sugeridos:**
-  - Añadir lógica de IA en la API (`api/`) para análisis avanzado de trades.
-  - Crear hooks o componentes en React para mostrar recomendaciones generadas por IA.
-  - Utilizar archivos de configuración (`package.json`, `vercel.json`) para definir scripts automáticos o flujos de CI/CD.
+## Ejemplo de estructura de trade
+```json
+{
+  "side": "BUY" | "SELL",
+  "size": 5,
+  "price": 0.9,
+  "market": "...",
+  "outcome": "Up",
+  "timestamp": 1776151173,
+  ...
+}
+```
 
-## Recomendaciones para agentes
-- Analizar y modificar la lógica de la API para implementar nuevas estrategias de análisis.
-- Añadir tests automáticos para asegurar la robustez de los cambios.
-- Mantener la documentación actualizada para facilitar futuras integraciones.
-
+## Recomendaciones
+- Mantener la consistencia de los datos para facilitar el análisis automatizado.
+- Documentar cualquier cambio en la estructura de los datos o lógica de cálculo.
+- Para IA, proveer ejemplos de datos y resultados esperados para facilitar el entrenamiento o ajuste de modelos.

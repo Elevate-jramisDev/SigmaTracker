@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
 const API_BASE = import.meta.env.DEV ? "/trades-proxy" : "/api/trades";
@@ -15,6 +15,14 @@ const PERIODS = [
 const fmt = (n, dec = 2) => (n == null ? "—" : Number(n).toFixed(dec));
 const fmtPct = n => (n == null ? "—" : `${n >= 0 ? "+" : ""}${fmt(n)}%`);
 const fmtUSDC = n => (n == null ? "—" : `${n >= 0 ? "+" : ""}${fmt(n)} USDC`);
+
+// Utilidad para obtener la fecha actual en formato YYYY-MM-DD
+function todayStr() {
+  const d = new Date();
+  const m = (d.getMonth() + 1).toString().padStart(2, "0");
+  const day = d.getDate().toString().padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+}
 
 function periodStart(p) {
   const now = Date.now();
@@ -37,6 +45,8 @@ function parseTrades(raw) {
       ts,
       market: t.market || t.conditionId || "—",
       marketSlug: t.marketSlug || t.title || t.question || t.market || "—",
+      asset: t.asset || "",
+      icon: t.icon || (t.assetIcon || t.raw?.icon) || undefined, // Propaga icon si existe
       side,
       outcome,
       size,
@@ -52,7 +62,8 @@ function computePnL(trades) {
   const sorted = [...trades].sort((a, b) => a.ts - b.ts);
 
   for (const t of sorted) {
-    const key = `${t.market}_${t.outcome}`;
+    // Agrupar por asset y outcome para evitar perder trades por nombres distintos
+    const key = `${t.asset || t.market}_${t.outcome}`;
     if (!positions[key]) positions[key] = { size: 0, cost: 0, market: t.marketSlug, outcome: t.outcome };
     const pos = positions[key];
 
@@ -63,7 +74,7 @@ function computePnL(trades) {
       const avgCost = pos.size > 0 ? pos.cost / pos.size : t.price;
       const pnl = (t.price - avgCost) * t.size;
       const pct = avgCost > 0 ? ((t.price - avgCost) / avgCost) * 100 : 0;
-      closed.push({ ...t, pnl, pct, posSize: t.size, win: pnl >= 0 });
+      closed.push({ ...t, pnl, pct, posSize: t.size, win: pnl >= 0, entryPrice: avgCost, icon: t.icon }); // Propaga icon
       pos.size = Math.max(0, pos.size - t.size);
       pos.cost = pos.size > 0 ? avgCost * pos.size : 0;
     }
@@ -78,12 +89,14 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [period, setPeriod] = useState("all");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [dateFrom, setDateFrom] = useState(todayStr());
+  const [dateTo, setDateTo] = useState(todayStr());
   const [sideFilter, setSideFilter] = useState("all");
   const [tab, setTab] = useState("table");
   const [sortCol, setSortCol] = useState("ts");
   const [sortDir, setSortDir] = useState("desc");
+  const [compareResult, setCompareResult] = useState(null);
+  const fileInputRef = useRef();
 
   const fetchTrades = useCallback(async () => {
     if (!wallet.trim()) return;
@@ -116,11 +129,24 @@ export default function App() {
     }
   }, [wallet]);
 
-  const filtered = useMemo(() => {
+  // Log temporal para depuración: contar trades del día 14 antes del filtrado
+  if (allTrades.length > 0) {
+    const dia14 = allTrades.filter(t => {
+      const d = t.ts;
+      return d.getFullYear() === 2026 && d.getMonth() === 3 && d.getDate() === 14;
+    });
+    console.log("Trades en allTrades para el 14/04/2026:", dia14.length, dia14.map(t => t.ts.toISOString()));
+  }
+
+  // Calcular P&L SIEMPRE sobre el historial completo
+  const allClosedTrades = useMemo(() => computePnL(allTrades), [allTrades]);
+
+  // Filtrar los trades cerrados por fecha, periodo, etc.
+  const filteredClosed = useMemo(() => {
     const start = periodStart(period);
     const from = dateFrom ? new Date(dateFrom).getTime() : 0;
     const to = dateTo ? new Date(dateTo).getTime() + 86400_000 : Infinity;
-    return allTrades.filter(t => {
+    return allClosedTrades.filter(t => {
       const ms = t.ts.getTime();
       if (period !== "all" && ms < start) return false;
       if (dateFrom && ms < from) return false;
@@ -128,22 +154,20 @@ export default function App() {
       if (sideFilter !== "all" && t.side !== sideFilter) return false;
       return true;
     });
-  }, [allTrades, period, dateFrom, dateTo, sideFilter]);
-
-  const pnlTrades = useMemo(() => computePnL(filtered), [filtered]);
+  }, [allClosedTrades, period, dateFrom, dateTo, sideFilter]);
 
   const stats = useMemo(() => {
-    const wins = pnlTrades.filter(t => t.win);
-    const losses = pnlTrades.filter(t => !t.win);
-    const totalPnl = pnlTrades.reduce((s, t) => s + t.pnl, 0);
-    const winRate = pnlTrades.length ? (wins.length / pnlTrades.length) * 100 : 0;
-    const best = pnlTrades.length ? Math.max(...pnlTrades.map(t => t.pnl)) : 0;
-    const worst = pnlTrades.length ? Math.min(...pnlTrades.map(t => t.pnl)) : 0;
-    return { total: pnlTrades.length, wins: wins.length, losses: losses.length, totalPnl, winRate, best, worst };
-  }, [pnlTrades]);
+    const wins = filteredClosed.filter(t => t.win);
+    const losses = filteredClosed.filter(t => !t.win);
+    const totalPnl = filteredClosed.reduce((s, t) => s + t.pnl, 0);
+    const winRate = filteredClosed.length ? (wins.length / filteredClosed.length) * 100 : 0;
+    const best = filteredClosed.length ? Math.max(...filteredClosed.map(t => t.pnl)) : 0;
+    const worst = filteredClosed.length ? Math.min(...filteredClosed.map(t => t.pnl)) : 0;
+    return { total: filteredClosed.length, wins: wins.length, losses: losses.length, totalPnl, winRate, best, worst };
+  }, [filteredClosed]);
 
   const cumPnlData = useMemo(() => {
-    const sorted = [...pnlTrades].sort((a, b) => a.ts - b.ts);
+    const sorted = [...filteredClosed].sort((a, b) => a.ts - b.ts);
     let cum = 0;
     return sorted.map(t => {
       cum += t.pnl;
@@ -152,21 +176,21 @@ export default function App() {
         pnl: parseFloat(cum.toFixed(4)),
       };
     });
-  }, [pnlTrades]);
+  }, [filteredClosed]);
 
   const dailyPnlData = useMemo(() => {
     const map = {};
-    for (const t of pnlTrades) {
+    for (const t of filteredClosed) {
       const d = t.ts.toLocaleDateString("es-ES");
       map[d] = (map[d] || 0) + t.pnl;
     }
     return Object.entries(map)
       .sort((a, b) => new Date(a[0].split("/").reverse().join("-")) - new Date(b[0].split("/").reverse().join("-")))
       .map(([date, pnl]) => ({ date, pnl: parseFloat(pnl.toFixed(4)) }));
-  }, [pnlTrades]);
+  }, [filteredClosed]);
 
   const sortedTrades = useMemo(() => {
-    const t = [...pnlTrades];
+    const t = [...filteredClosed];
     t.sort((a, b) => {
       let va = a[sortCol], vb = b[sortCol];
       if (sortCol === "ts") { va = a.ts.getTime(); vb = b.ts.getTime(); }
@@ -175,12 +199,51 @@ export default function App() {
       return 0;
     });
     return t;
-  }, [pnlTrades, sortCol, sortDir]);
+  }, [filteredClosed, sortCol, sortDir]);
 
   const toggleSort = col => {
     if (sortCol === col) setSortDir(d => d === "asc" ? "desc" : "asc");
     else { setSortCol(col); setSortDir("desc"); }
   };
+
+  function compareTrades(uploaded) {
+    // Normaliza los IDs
+    const getId = t => t.id || t.transactionHash || t.txHash || t.hash || "";
+    const localIds = new Set(allTrades.map(getId));
+    const uploadedIds = new Set(uploaded.map(getId));
+    const missing = uploaded.filter(t => !localIds.has(getId(t)));
+    const extra = allTrades.filter(t => !uploadedIds.has(getId(t)));
+    // Diferencias de campos clave
+    const diffs = [];
+    for (const t of uploaded) {
+      const id = getId(t);
+      const local = allTrades.find(x => getId(x) === id);
+      if (local) {
+        ["asset","side","size","price","outcome","timestamp"].forEach(k => {
+          if (String(local[k]) !== String(t[k])) {
+            diffs.push({ id, field: k, local: local[k], uploaded: t[k] });
+          }
+        });
+      }
+    }
+    setCompareResult({ missing, extra, diffs });
+  }
+
+  function handleFileChange(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const json = JSON.parse(ev.target.result);
+        if (!Array.isArray(json)) throw new Error("El JSON debe ser un array");
+        compareTrades(json);
+      } catch (err) {
+        setCompareResult({ error: err.message });
+      }
+    };
+    reader.readAsText(file);
+  }
 
   const s = {
     wrap: { fontFamily: "system-ui, sans-serif", background: "#0f1117", color: "#e2e8f0", minHeight: "100vh", padding: "24px 20px" },
@@ -252,7 +315,7 @@ export default function App() {
               <option value="BUY">BUY</option>
               <option value="SELL">SELL</option>
             </select>
-            <span style={{ fontSize: 12, color: "#475569", marginLeft: "auto" }}>{filtered.length} trades · {pnlTrades.length} cerrados</span>
+            <span style={{ fontSize: 12, color: "#475569", marginLeft: "auto" }}>{filteredClosed.length} trades · {allClosedTrades.length} cerrados</span>
           </div>
 
           <div style={s.kpiGrid}>
@@ -265,34 +328,41 @@ export default function App() {
           </div>
 
           <div style={s.tabs}>
-            {["table", "charts"].map(t => (
+            {["table", "charts", "raw"].map(t => (
               <button key={t} style={s.tabBtn(tab === t)} onClick={() => setTab(t)}>
-                {t === "table" ? "Historial" : "Gráficos"}
+                {t === "table" ? "Historial" : t === "charts" ? "Gráficos" : "Todos los trades"}
               </button>
             ))}
           </div>
 
           {tab === "table" && (
-            pnlTrades.length === 0
+            allClosedTrades.length === 0
               ? <div style={s.empty}>No hay trades cerrados en este período.<br /><span style={{ fontSize: 12 }}>Los trades necesitan una operación de venta para calcular P&L.</span></div>
               : <div style={{ overflowX: "auto" }}>
                   <table style={s.table}>
                     <thead>
                       <tr>
-                        {[["ts","Fecha/Hora"],["marketSlug","Mercado"],["outcome","Posición"],["posSize","Tamaño"],["win","W/L"],["pnl","P&L (USDC)"],["pct","% P&L"]].map(([col, label]) => (
-                          <th key={col} style={s.th} onClick={() => toggleSort(col)}>
-                            {label} {sortCol === col ? (sortDir === "desc" ? "↓" : "↑") : ""}
-                          </th>
-                        ))}
+                        <th style={s.th} onClick={() => toggleSort("ts")}>Fecha/Hora {sortCol === "ts" ? (sortDir === "desc" ? "↓" : "↑") : ""}</th>
+                        <th style={s.th} onClick={() => toggleSort("marketSlug")}>Mercado {sortCol === "marketSlug" ? (sortDir === "desc" ? "↓" : "↑") : ""}</th>
+                        <th style={s.th} onClick={() => toggleSort("outcome")}>Posición {sortCol === "outcome" ? (sortDir === "desc" ? "↓" : "↑") : ""}</th>
+                        <th style={s.th} onClick={() => toggleSort("posSize")}>Tamaño {sortCol === "posSize" ? (sortDir === "desc" ? "↓" : "↑") : ""}</th>
+                        <th style={s.th} onClick={() => toggleSort("entryPrice")}>Precio entrada {sortCol === "entryPrice" ? (sortDir === "desc" ? "↓" : "↑") : ""}</th>
+                        <th style={s.th} onClick={() => toggleSort("win")}>W/L {sortCol === "win" ? (sortDir === "desc" ? "↓" : "↑") : ""}</th>
+                        <th style={s.th} onClick={() => toggleSort("pnl")}>P&L (USDC) {sortCol === "pnl" ? (sortDir === "desc" ? "↓" : "↑") : ""}</th>
+                        <th style={s.th} onClick={() => toggleSort("pct")}>% P&L {sortCol === "pct" ? (sortDir === "desc" ? "↓" : "↑") : ""}</th>
                       </tr>
                     </thead>
                     <tbody>
                       {sortedTrades.map((t, i) => (
-                        <tr key={t.id + i} style={{ background: i % 2 === 0 ? "transparent" : "#161b2a" }}>
+                        <tr key={t.id + '-' + i} style={{ background: i % 2 === 0 ? "transparent" : "#161b2a" }}>
                           <td style={s.td}>{t.ts.toLocaleString("es-ES", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
-                          <td style={{ ...s.td, maxWidth: 200 }} title={t.marketSlug}>{t.marketSlug}</td>
+                          <td style={{ ...s.td, maxWidth: 300, display: "flex", alignItems: "center", gap: 8 }} title={t.marketSlug}>
+                            {t.icon && <img src={t.icon} alt="icon" style={{ width: 20, height: 20, borderRadius: 4, verticalAlign: "middle" }} />}
+                            {t.marketSlug}
+                          </td>
                           <td style={s.td}>{t.outcome || t.side}</td>
                           <td style={s.td}>{fmt(t.posSize, 4)}</td>
+                          <td style={s.td}>{fmt(t.entryPrice, 4)}</td>
                           <td style={s.td}><span style={s.badge(t.win)}>{t.win ? "WIN" : "LOSS"}</span></td>
                           <td style={{ ...s.td, color: t.pnl >= 0 ? "#4ade80" : "#f87171", fontWeight: 600 }}>{fmtUSDC(t.pnl)}</td>
                           <td style={{ ...s.td, color: t.pct >= 0 ? "#4ade80" : "#f87171" }}>{fmtPct(t.pct)}</td>
@@ -301,6 +371,89 @@ export default function App() {
                     </tbody>
                   </table>
                 </div>
+          )}
+
+          {tab === "raw" && (
+            <>
+              <div style={{ margin: "10px 0" }}>
+                <button style={s.btn} onClick={() => fileInputRef.current.click()}>Comparar con JSON</button>
+                <input type="file" accept="application/json" ref={fileInputRef} style={{ display: "none" }} onChange={handleFileChange} />
+              </div>
+              {compareResult && (
+                <div style={{ background: "#1e2433", borderRadius: 8, padding: 16, marginBottom: 16, color: "#facc15" }}>
+                  {compareResult.error && <div style={{ color: "#f87171" }}>Error: {compareResult.error}</div>}
+                  {compareResult.missing && compareResult.missing.length > 0 && (
+                    <div>Faltan en la tabla: <b>{compareResult.missing.length}</b></div>
+                  )}
+                  {compareResult.extra && compareResult.extra.length > 0 && (
+                    <div>Sobran en la tabla: <b>{compareResult.extra.length}</b></div>
+                  )}
+                  {compareResult.diffs && compareResult.diffs.length > 0 && (
+                    <div>Diferencias de campos: <b>{compareResult.diffs.length}</b>
+                      <details style={{ color: "#fde68a" }}>
+                        <summary>Ver detalles</summary>
+                        <ul>
+                          {compareResult.diffs.map((d, i) => (
+                            <li key={i}>ID: {d.id}, campo: {d.field}, tabla: {String(d.local)}, JSON: {String(d.uploaded)}</li>
+                          ))}
+                        </ul>
+                      </details>
+                    </div>
+                  )}
+                  {compareResult && !compareResult.error && compareResult.missing.length === 0 && compareResult.extra.length === 0 && compareResult.diffs.length === 0 && (
+                    <div style={{ color: "#22c55e" }}>¡Todos los trades coinciden!</div>
+                  )}
+                </div>
+              )}
+              {allTrades.length === 0
+                ? <div style={s.empty}>No hay trades.</div>
+                : <div style={{ overflowX: "auto" }}>
+                    <table style={s.table}>
+                      <thead>
+                        <tr>
+                          <th style={s.th}>Fecha/Hora</th>
+                          <th style={s.th}>Mercado</th>
+                          <th style={s.th}>Asset</th>
+                          <th style={s.th}>Side</th>
+                          <th style={s.th}>Size</th>
+                          <th style={s.th}>Price</th>
+                          <th style={s.th}>Outcome</th>
+                          <th style={s.th}>TxHash</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {allTrades.map((t, i) => (
+                          <tr key={t.id + '-' + i} style={{ background: i % 2 === 0 ? "transparent" : "#161b2a" }}>
+                            <td style={s.td}>{t.ts.toLocaleString("es-ES", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
+                            <td
+                              style={{
+                                ...s.td,
+                                maxWidth: undefined, // Quita el límite de ancho
+                                whiteSpace: "normal", // Permite salto de línea
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 8,
+                                overflow: "visible", // Permite expandirse
+                                textOverflow: "unset"
+                              }}
+                              title={t.marketSlug}
+                            >
+                              {t.icon && <img src={t.icon} alt="icon" style={{ width: 20, height: 20, borderRadius: 4, verticalAlign: "middle" }} />}
+                              <span>{t.marketSlug}</span>
+                            </td>
+                            <td style={s.td}>{t.asset}</td>
+                            <td style={s.td}>{t.side}</td>
+                            <td style={s.td}>{fmt(t.size, 4)}</td>
+                            <td style={s.td}>{fmt(t.price, 4)}</td>
+                            <td style={s.td}>{t.outcome}</td>
+                            <td style={s.td}>{t.id}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+              }
+            </>
           )}
 
           {tab === "charts" && (

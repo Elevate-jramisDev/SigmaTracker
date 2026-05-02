@@ -95,6 +95,55 @@ function computePnL(trades) {
   return closed;
 }
 
+// --- MÉTRICAS AVANZADAS ---
+function calcSharpe(trades) {
+  if (!trades.length) return 0;
+  const daily = {};
+  for (const t of trades) {
+    const d = t.ts.toISOString().slice(0, 10);
+    daily[d] = (daily[d] || 0) + t.pnl;
+  }
+  const vals = Object.values(daily);
+  const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+  const std = Math.sqrt(vals.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / vals.length);
+  return std === 0 ? 0 : mean / std;
+}
+function calcMaxDrawdown(trades) {
+  let maxDD = 0, peak = 0, cum = 0;
+  for (const t of [...trades].sort((a, b) => a.ts - b.ts)) {
+    cum += t.pnl;
+    if (cum > peak) peak = cum;
+    const dd = peak - cum;
+    if (dd > maxDD) maxDD = dd;
+  }
+  return maxDD;
+}
+function calcProfitFactor(trades) {
+  const wins = trades.filter(t => t.pnl > 0).reduce((a, b) => a + b.pnl, 0);
+  const losses = Math.abs(trades.filter(t => t.pnl < 0).reduce((a, b) => a + b.pnl, 0));
+  return losses === 0 ? 0 : wins / losses;
+}
+function calcAvgDuration(trades) {
+  if (!trades.length) return 0;
+  const durations = trades.map(t => t.raw && t.raw.openedAt && t.raw.closedAt ? (t.raw.closedAt - t.raw.openedAt) : 0).filter(Boolean);
+  if (!durations.length) return 0;
+  return durations.reduce((a, b) => a + b, 0) / durations.length / 3600_000; // horas
+}
+function calcPnLByMarket(trades) {
+  const map = {};
+  for (const t of trades) {
+    map[t.marketSlug] = (map[t.marketSlug] || 0) + t.pnl;
+  }
+  return map;
+}
+function calcPnLByOutcome(trades) {
+  const map = {};
+  for (const t of trades) {
+    map[t.outcome] = (map[t.outcome] || 0) + t.pnl;
+  }
+  return map;
+}
+
 export default function App() {
   const [wallet, setWallet] = useState("0xe1c70472413b93FD6FFEDF45869c7AA0A909ACd5");
   const [allTrades, setAllTrades] = useState([]);
@@ -327,6 +376,14 @@ export default function App() {
     badge: win => ({ display: "inline-block", padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: win ? "#052e16" : "#2d1b1b", color: win ? "#4ade80" : "#f87171" }),
   };
 
+  // KPIs y breakdowns avanzados
+  const sharpe = useMemo(() => calcSharpe(filteredClosed), [filteredClosed]);
+  const maxDrawdown = useMemo(() => calcMaxDrawdown(filteredClosed), [filteredClosed]);
+  const profitFactor = useMemo(() => calcProfitFactor(filteredClosed), [filteredClosed]);
+  const avgDuration = useMemo(() => calcAvgDuration(filteredClosed), [filteredClosed]);
+  const pnlByMarket = useMemo(() => calcPnLByMarket(filteredClosed), [filteredClosed]);
+  const pnlByOutcome = useMemo(() => calcPnLByOutcome(filteredClosed), [filteredClosed]);
+
   return (
     <div style={s.wrap}>
       <div style={s.header}>
@@ -387,6 +444,11 @@ export default function App() {
             <div style={s.kpi("#22c55e")}><div style={s.kpiLabel}>Wins / Losses</div><div style={s.kpiVal()}><span style={{ color: "#4ade80" }}>{stats.wins}</span> / <span style={{ color: "#f87171" }}>{stats.losses}</span></div></div>
             <div style={s.kpi("#22c55e")}><div style={s.kpiLabel}>Mejor trade</div><div style={s.kpiVal("#4ade80")}>{fmtUSDC(stats.best)}</div></div>
             <div style={s.kpi("#ef4444")}><div style={s.kpiLabel}>Peor trade</div><div style={s.kpiVal("#f87171")}>{fmtUSDC(stats.worst)}</div></div>
+            {/* KPIs extra */}
+            <div style={s.kpi("#818cf8")}><div style={s.kpiLabel}>Sharpe</div><div style={s.kpiVal()}>{fmt(sharpe, 2)}</div></div>
+            <div style={s.kpi("#f472b6")}><div style={s.kpiLabel}>Max Drawdown</div><div style={s.kpiVal("#f472b6")}>{fmtUSDC(-maxDrawdown)}</div></div>
+            <div style={s.kpi("#f59e42")}><div style={s.kpiLabel}>Profit Factor</div><div style={s.kpiVal()}>{fmt(profitFactor, 2)}</div></div>
+            <div style={s.kpi("#38bdf8")}><div style={s.kpiLabel}>Duración media (h)</div><div style={s.kpiVal()}>{fmt(avgDuration, 2)}</div></div>
           </div>
 
           <div style={s.tabs}>
@@ -571,6 +633,61 @@ export default function App() {
                       <div style={{ borderTop: "1px solid #2d3748", paddingTop: 10, color: "#facc15", fontWeight: 700, fontSize: 16 }}>{fmt(stats.winRate, 1)}%</div>
                     </div>
                   </div>
+                </div>
+              </div>
+
+              {/* --- VISUALIZACIONES --- */}
+              <div style={s.chartWrap}>
+                <div style={s.chartTitle}>Drawdown</div>
+                <div style={{ height: 180 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={(() => {
+                      let peak = 0, cum = 0;
+                      return [...filteredClosed].sort((a, b) => a.ts - b.ts).map(t => {
+                        cum += t.pnl;
+                        if (cum > peak) peak = cum;
+                        return { date: t.ts.toLocaleDateString("es-ES"), drawdown: peak - cum };
+                      });
+                    })()}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#1e2433" />
+                      <XAxis dataKey="date" tick={{ fill: "#64748b", fontSize: 10 }} />
+                      <YAxis tick={{ fill: "#64748b", fontSize: 10 }} />
+                      <Tooltip contentStyle={{ background: "#1e2433", border: "1px solid #2d3748", borderRadius: 8, color: "#e2e8f0", fontSize: 12 }} formatter={v => [`${Number(v).toFixed(4)} USDC`, "Drawdown"]} />
+                      <Line type="monotone" dataKey="drawdown" stroke="#f472b6" strokeWidth={2} dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+              <div style={s.chartWrap}>
+                <div style={s.chartTitle}>P&L por mercado</div>
+                <div style={{ height: 220 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={Object.entries(pnlByMarket).map(([market, pnl]) => ({ market, pnl }))}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#1e2433" />
+                      <XAxis dataKey="market" tick={{ fill: "#64748b", fontSize: 10 }} />
+                      <YAxis tick={{ fill: "#64748b", fontSize: 10 }} />
+                      <Tooltip contentStyle={{ background: "#1e2433", border: "1px solid #2d3748", borderRadius: 8, color: "#e2e8f0", fontSize: 12 }} formatter={v => [`${Number(v).toFixed(4)} USDC`, "P&L"]} />
+                      <Bar dataKey="pnl" radius={[3, 3, 0, 0]}>
+                        {Object.entries(pnlByMarket).map(([_, pnl], i) => <Cell key={i} fill={pnl >= 0 ? "#22c55e" : "#ef4444"} />)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+              <div style={s.chartWrap}>
+                <div style={s.chartTitle}>P&L por outcome</div>
+                <div style={{ height: 220 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={Object.entries(pnlByOutcome).map(([outcome, pnl]) => ({ outcome, pnl }))}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#1e2433" />
+                      <XAxis dataKey="outcome" tick={{ fill: "#64748b", fontSize: 10 }} />
+                      <YAxis tick={{ fill: "#64748b", fontSize: 10 }} />
+                      <Tooltip contentStyle={{ background: "#1e2433", border: "1px solid #2d3748", borderRadius: 8, color: "#e2e8f0", fontSize: 12 }} formatter={v => [`${Number(v).toFixed(4)} USDC`, "P&L"]} />
+                      <Bar dataKey="pnl" radius={[3, 3, 0, 0]}>
+                        {Object.entries(pnlByOutcome).map(([_, pnl], i) => <Cell key={i} fill={pnl >= 0 ? "#22c55e" : "#ef4444"} />)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
                 </div>
               </div>
             </div>

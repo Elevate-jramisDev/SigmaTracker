@@ -57,6 +57,7 @@ function parseTrades(raw) {
 }
 
 function computePnL(trades) {
+  // Usar FIFO para emparejar ventas con compras previas
   const positions = {};
   const closed = [];
   const sorted = [...trades].sort((a, b) => a.ts - b.ts);
@@ -64,19 +65,30 @@ function computePnL(trades) {
   for (const t of sorted) {
     // Agrupar por asset y outcome para evitar perder trades por nombres distintos
     const key = `${t.asset || t.market}_${t.outcome}`;
-    if (!positions[key]) positions[key] = { size: 0, cost: 0, market: t.marketSlug, outcome: t.outcome };
+    if (!positions[key]) positions[key] = { buys: [], market: t.marketSlug, outcome: t.outcome };
     const pos = positions[key];
 
     if (t.side === "BUY") {
-      pos.cost += t.size * t.price;
-      pos.size += t.size;
+      pos.buys.push({ size: t.size, price: t.price });
     } else if (t.side === "SELL") {
-      const avgCost = pos.size > 0 ? pos.cost / pos.size : t.price;
-      const pnl = (t.price - avgCost) * t.size;
-      const pct = avgCost > 0 ? ((t.price - avgCost) / avgCost) * 100 : 0;
-      closed.push({ ...t, pnl, pct, posSize: t.size, win: pnl >= 0, entryPrice: avgCost, icon: t.icon }); // Propaga icon
-      pos.size = Math.max(0, pos.size - t.size);
-      pos.cost = pos.size > 0 ? avgCost * pos.size : 0;
+      let sellSize = t.size;
+      let totalCost = 0;
+      let totalSize = 0;
+      // Emparejar ventas con compras FIFO
+      while (sellSize > 0 && pos.buys.length > 0) {
+        const buy = pos.buys[0];
+        const matchedSize = Math.min(buy.size, sellSize);
+        totalCost += matchedSize * buy.price;
+        totalSize += matchedSize;
+        buy.size -= matchedSize;
+        sellSize -= matchedSize;
+        if (buy.size === 0) pos.buys.shift();
+      }
+      // Si no hay compras previas, usar el precio de venta como referencia
+      const entryPrice = totalSize > 0 ? totalCost / totalSize : t.price;
+      const pnl = (t.price - entryPrice) * t.size;
+      const pct = entryPrice > 0 ? ((t.price - entryPrice) / entryPrice) * 100 : 0;
+      closed.push({ ...t, pnl, pct, posSize: t.size, win: pnl >= 0, entryPrice, icon: t.icon });
     }
   }
 
@@ -96,38 +108,73 @@ export default function App() {
   const [sortCol, setSortCol] = useState("ts");
   const [sortDir, setSortDir] = useState("desc");
   const [compareResult, setCompareResult] = useState(null);
+  const [dataSource, setDataSource] = useState(null); // "api" | "json"
   const fileInputRef = useRef();
+  const loadJsonRef = useRef();
 
   const fetchTrades = useCallback(async () => {
     if (!wallet.trim()) return;
     setLoading(true);
     setError("");
+    // Usar SOLO transactionHash para deduplicar (el campo id puede colisionar entre BUY y SELL)
     const seen = new Set();
     let all = [];
     let offset = 0;
     try {
       while (true) {
-        const url = `${API_BASE}?user=${wallet.trim()}&limit=${PAGE_SIZE}&offset=${offset}`;
+        const url = `${API_BASE}?user=${wallet.trim()}&limit=${PAGE_SIZE}&offset=${offset}&takerOnly=false`;
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (!Array.isArray(data) || data.length === 0) break;
         for (const t of data) {
-          const id = t.id || t.transactionHash;
-          if (id && seen.has(id)) continue;
-          if (id) seen.add(id);
+          // Usar transactionHash como clave única (no t.id, que puede no ser único por trade)
+          const key = t.transactionHash || t.id;
+          if (key && seen.has(key)) continue;
+          if (key) seen.add(key);
           all.push(t);
         }
         if (data.length < PAGE_SIZE) break;
         offset += PAGE_SIZE;
       }
       setAllTrades(parseTrades(all));
+      setDataSource("api");
     } catch (e) {
       setError(e.message);
     } finally {
       setLoading(false);
     }
   }, [wallet]);
+
+  function handleLoadFromJson(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const json = JSON.parse(ev.target.result);
+        if (!Array.isArray(json)) throw new Error("El JSON debe ser un array");
+        // Deduplicar por transactionHash igual que la API
+        const seen = new Set();
+        const deduped = [];
+        for (const t of json) {
+          const key = t.transactionHash || t.id;
+          if (key && seen.has(key)) continue;
+          if (key) seen.add(key);
+          deduped.push(t);
+        }
+        setAllTrades(parseTrades(deduped));
+        setDataSource("json");
+        setError("");
+        setCompareResult(null);
+      } catch (err) {
+        setError("Error cargando JSON: " + err.message);
+      }
+    };
+    reader.readAsText(file);
+    // Reset input para permitir cargar el mismo fichero otra vez
+    e.target.value = "";
+  }
 
   // Log temporal para depuración: contar trades del día 14 antes del filtrado
   if (allTrades.length > 0) {
@@ -293,8 +340,17 @@ export default function App() {
           onKeyDown={e => e.key === "Enter" && fetchTrades()}
         />
         <button style={s.btn} onClick={fetchTrades} disabled={loading}>
-          {loading ? "Cargando…" : "Cargar datos"}
+          {loading ? "Cargando…" : "Cargar desde API"}
         </button>
+        <button style={{ ...s.btn, background: "#0f766e" }} onClick={() => loadJsonRef.current.click()} disabled={loading}>
+          Cargar desde JSON
+        </button>
+        <input type="file" accept="application/json" ref={loadJsonRef} style={{ display: "none" }} onChange={handleLoadFromJson} />
+        {dataSource && (
+          <span style={{ fontSize: 11, color: dataSource === "json" ? "#34d399" : "#60a5fa", background: "#1e2433", borderRadius: 4, padding: "4px 8px", alignSelf: "center" }}>
+            {dataSource === "json" ? "📄 Datos: JSON local" : "🌐 Datos: API"}
+          </span>
+        )}
       </div>
 
       {error && <div style={s.error}>Error: {error}</div>}
@@ -428,12 +484,12 @@ export default function App() {
                             <td
                               style={{
                                 ...s.td,
-                                maxWidth: undefined, // Quita el límite de ancho
-                                whiteSpace: "normal", // Permite salto de línea
+                                maxWidth: undefined,
+                                whiteSpace: "normal",
                                 display: "flex",
                                 alignItems: "center",
                                 gap: 8,
-                                overflow: "visible", // Permite expandirse
+                                overflow: "visible",
                                 textOverflow: "unset"
                               }}
                               title={t.marketSlug}

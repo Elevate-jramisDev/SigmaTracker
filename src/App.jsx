@@ -291,6 +291,7 @@ export default function App() {
       .map(([date, pnl]) => ({ date, pnl: parseFloat(pnl.toFixed(4)) }));
   }, [filteredClosed]);
 
+  // sortedTrades ahora incluye el P&L absoluto acumulado
   const sortedTrades = useMemo(() => {
     const t = [...filteredClosed];
     t.sort((a, b) => {
@@ -300,7 +301,12 @@ export default function App() {
       if (va > vb) return sortDir === "asc" ? 1 : -1;
       return 0;
     });
-    return t;
+    // Calcular P&L absoluto acumulado
+    let abs = 0;
+    return t.map(trade => {
+      abs += trade.pnl;
+      return { ...trade, pnlAbs: abs };
+    });
   }, [filteredClosed, sortCol, sortDir]);
 
   const toggleSort = col => {
@@ -465,33 +471,35 @@ export default function App() {
               : <div style={{ overflowX: "auto" }}>
                   <table style={s.table}>
                     <thead>
-                      <tr>
-                        <th style={s.th} onClick={() => toggleSort("ts")}>Fecha/Hora {sortCol === "ts" ? (sortDir === "desc" ? "↓" : "↑") : ""}</th>
-                        <th style={s.th} onClick={() => toggleSort("marketSlug")}>Mercado {sortCol === "marketSlug" ? (sortDir === "desc" ? "↓" : "↑") : ""}</th>
-                        <th style={s.th} onClick={() => toggleSort("outcome")}>Posición {sortCol === "outcome" ? (sortDir === "desc" ? "↓" : "↑") : ""}</th>
-                        <th style={s.th} onClick={() => toggleSort("posSize")}>Tamaño {sortCol === "posSize" ? (sortDir === "desc" ? "↓" : "↑") : ""}</th>
-                        <th style={s.th} onClick={() => toggleSort("entryPrice")}>Precio entrada {sortCol === "entryPrice" ? (sortDir === "desc" ? "↓" : "↑") : ""}</th>
-                        <th style={s.th} onClick={() => toggleSort("win")}>W/L {sortCol === "win" ? (sortDir === "desc" ? "↓" : "↑") : ""}</th>
-                        <th style={s.th} onClick={() => toggleSort("pnl")}>P&L (USDC) {sortCol === "pnl" ? (sortDir === "desc" ? "↓" : "↑") : ""}</th>
-                        <th style={s.th} onClick={() => toggleSort("pct")}>% P&L {sortCol === "pct" ? (sortDir === "desc" ? "↓" : "↑") : ""}</th>
-                      </tr>
+                       <tr>
+                         <th style={s.th} onClick={() => toggleSort("ts")}>Fecha/Hora {sortCol === "ts" ? (sortDir === "desc" ? "↓" : "↑") : ""}</th>
+                         <th style={s.th} onClick={() => toggleSort("marketSlug")}>Mercado {sortCol === "marketSlug" ? (sortDir === "desc" ? "↓" : "↑") : ""}</th>
+                         <th style={s.th} onClick={() => toggleSort("outcome")}>Posición {sortCol === "outcome" ? (sortDir === "desc" ? "↓" : "↑") : ""}</th>
+                         <th style={s.th} onClick={() => toggleSort("posSize")}>Tamaño {sortCol === "posSize" ? (sortDir === "desc" ? "↓" : "↑") : ""}</th>
+                         <th style={s.th} onClick={() => toggleSort("entryPrice")}>Precio entrada {sortCol === "entryPrice" ? (sortDir === "desc" ? "↓" : "↑") : ""}</th>
+                         <th style={s.th} onClick={() => toggleSort("win")}>W/L {sortCol === "win" ? (sortDir === "desc" ? "↓" : "↑") : ""}</th>
+                         <th style={s.th} onClick={() => toggleSort("pnl")}>P&L (USDC) {sortCol === "pnl" ? (sortDir === "desc" ? "↓" : "↑") : ""}</th>
+                         <th style={s.th}>P&L Absoluto</th>
+                         <th style={s.th} onClick={() => toggleSort("pct")}>% P&L {sortCol === "pct" ? (sortDir === "desc" ? "↓" : "↑") : ""}</th>
+                       </tr>
                     </thead>
                     <tbody>
-                      {sortedTrades.map((t, i) => (
-                        <tr key={t.id + '-' + i} style={{ background: i % 2 === 0 ? "transparent" : "#161b2a" }}>
-                          <td style={s.td}>{t.ts.toLocaleString("es-ES", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
-                          <td style={{ ...s.td, maxWidth: 300, display: "flex", alignItems: "center", gap: 8 }} title={t.marketSlug}>
-                            {t.icon && <img src={t.icon} alt="icon" style={{ width: 20, height: 20, borderRadius: 4, verticalAlign: "middle" }} />}
-                            {t.marketSlug}
-                          </td>
-                          <td style={s.td}>{t.outcome || t.side}</td>
-                          <td style={s.td}>{fmt(t.posSize, 4)}</td>
-                          <td style={s.td}>{fmt(t.entryPrice, 4)}</td>
-                          <td style={s.td}><span style={s.badge(t.win)}>{t.win ? "WIN" : "LOSS"}</span></td>
-                          <td style={{ ...s.td, color: t.pnl >= 0 ? "#4ade80" : "#f87171", fontWeight: 600 }}>{fmtUSDC(t.pnl)}</td>
-                          <td style={{ ...s.td, color: t.pct >= 0 ? "#4ade80" : "#f87171" }}>{fmtPct(t.pct)}</td>
-                        </tr>
-                      ))}
+                       {sortedTrades.map((t, i) => (
+                         <tr key={t.id + '-' + i} style={{ background: i % 2 === 0 ? "transparent" : "#161b2a" }}>
+                           <td style={s.td}>{t.ts.toLocaleString("es-ES", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
+                           <td style={{ ...s.td, maxWidth: 300, display: "flex", alignItems: "center", gap: 8 }} title={t.marketSlug}>
+                             {t.icon && <img src={t.icon} alt="icon" style={{ width: 20, height: 20, borderRadius: 4, verticalAlign: "middle" }} />}
+                             {t.marketSlug}
+                           </td>
+                           <td style={s.td}>{t.outcome || t.side}</td>
+                           <td style={s.td}>{fmt(t.posSize, 4)}</td>
+                           <td style={s.td}>{fmt(t.entryPrice, 4)}</td>
+                           <td style={s.td}><span style={s.badge(t.win)}>{t.win ? "WIN" : "LOSS"}</span></td>
+                           <td style={{ ...s.td, color: t.pnl >= 0 ? "#4ade80" : "#f87171", fontWeight: 600 }}>{fmtUSDC(t.pnl)}</td>
+                           <td style={{ ...s.td, color: t.pnlAbs >= 0 ? "#818cf8" : "#f87171", fontWeight: 600 }}>{fmtUSDC(t.pnlAbs)}</td>
+                           <td style={{ ...s.td, color: t.pct >= 0 ? "#4ade80" : "#f87171" }}>{fmtPct(t.pct)}</td>
+                         </tr>
+                       ))}
                     </tbody>
                   </table>
                 </div>

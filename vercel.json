@@ -1,5 +1,3 @@
 {
-  "rewrites": [
-    { "source": "/api/trades", "destination": "/backend/trades.js" }
-  ]
+  "rewrites": [{ "source": "/(.*)", "destination": "/" }]
 }

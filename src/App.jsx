@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
 const API_BASE = import.meta.env.DEV ? "/trades-proxy" : "/api/trades";
@@ -100,7 +100,13 @@ export default function App() {
   const [allTrades, setAllTrades] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [period, setPeriod] = useState("all");
+  const [period, setPeriod] = useState("24h");
+      // Al montar, cargar automáticamente los datos de la API si no hay datos
+      useEffect(() => {
+        if (allTrades.length === 0 && !loading && !error) {
+          fetchTrades();
+        }
+      }, []); // Solo una vez al montar
   const [dateFrom, setDateFrom] = useState(todayStr());
   const [dateTo, setDateTo] = useState(todayStr());
   const [sideFilter, setSideFilter] = useState("all");

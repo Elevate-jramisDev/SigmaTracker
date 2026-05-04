@@ -448,8 +448,8 @@ export default function App() {
             <div style={s.kpi(stats.totalPnl >= 0 ? "#22c55e" : "#ef4444")}><div style={s.kpiLabel}>P&L Total</div><div style={s.kpiVal(stats.totalPnl >= 0 ? "#4ade80" : "#f87171")}>{fmtUSDC(stats.totalPnl)}</div></div>
             <div style={s.kpi("#facc15")}><div style={s.kpiLabel}>Win Rate</div><div style={s.kpiVal("#fde68a")}>{fmt(stats.winRate, 1)}%</div></div>
             <div style={s.kpi("#22c55e")}><div style={s.kpiLabel}>Wins / Losses</div><div style={s.kpiVal()}><span style={{ color: "#4ade80" }}>{stats.wins}</span> / <span style={{ color: "#f87171" }}>{stats.losses}</span></div></div>
-            <div style={s.kpi("#22c55e")}><div style={s.kpiLabel}>Mejor trade</div><div style={s.kpiVal("#4ade80")}>{fmtUSDC(stats.best)}</div></div>
-            <div style={s.kpi("#ef4444")}><div style={s.kpiLabel}>Peor trade</div><div style={s.kpiVal("#f87171")}>{fmtUSDC(stats.worst)}</div></div>
+            <div style={s.kpi(stats.best >= 0 ? "#22c55e" : "#ef4444")}> <div style={s.kpiLabel}>Mejor trade</div><div style={s.kpiVal(stats.best >= 0 ? "#4ade80" : "#f87171")}>{fmtUSDC(stats.best)}</div></div>
+            <div style={s.kpi(stats.worst >= 0 ? "#22c55e" : "#ef4444")}> <div style={s.kpiLabel}>Peor trade</div><div style={s.kpiVal(stats.worst >= 0 ? "#4ade80" : "#f87171")}>{fmtUSDC(stats.worst)}</div></div>
             {/* KPIs extra */}
             <div style={s.kpi("#818cf8")}><div style={s.kpiLabel}>Sharpe</div><div style={s.kpiVal()}>{fmt(sharpe, 2)}</div></div>
             <div style={s.kpi("#f472b6")}><div style={s.kpiLabel}>Max Drawdown</div><div style={s.kpiVal("#f472b6")}>{fmtUSDC(-maxDrawdown)}</div></div>

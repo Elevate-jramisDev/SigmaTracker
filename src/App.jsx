@@ -393,7 +393,7 @@ export default function App() {
   return (
     <div style={s.wrap}>
       <div style={s.header}>
-        <div style={s.logo}>P</div>
+        <div style={s.logo}>T</div>
         <div>
           <p style={s.title}>Tracker</p>
           <p style={s.subtitle}>Rendimiento del bot de trading</p>

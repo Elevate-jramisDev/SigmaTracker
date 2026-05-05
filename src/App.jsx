@@ -395,7 +395,7 @@ export default function App() {
       <div style={s.header}>
         <div style={s.logo}>P</div>
         <div>
-          <p style={s.title}>Polymarket Tracker</p>
+          <p style={s.title}>Tracker</p>
           <p style={s.subtitle}>Rendimiento del bot de trading</p>
         </div>
       </div>

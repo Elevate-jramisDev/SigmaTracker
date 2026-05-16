@@ -123,9 +123,6 @@ export default function App() {
             <span className="dot" />
             <span className="header-label">Trade Tracker</span>
           </div>
-          <div style={{ color: "#fbbf24", fontWeight: 700, fontSize: 15 }}>
-            Balance wallet: {walletBalance.toFixed(2)} $
-          </div>
         </div>
         <div className="search-row">
           <input
@@ -154,6 +151,7 @@ export default function App() {
               { label: "Ganadoras",  val: winners,                     col: "#4ade80" },
               { label: "Perdedoras", val: losers,                      col: "#f87171" },
               { label: "Invertido",  val: totalCost.toFixed(1) + " $", col: "#94a3b8" },
+              { label: "Balance wallet", val: walletBalance.toFixed(2) + " $", col: "#fbbf24" },
             ].map(c => (
               <div key={c.label} className="card">
                 <span className="card-label">{c.label}</span>

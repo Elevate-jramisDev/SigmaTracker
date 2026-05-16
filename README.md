@@ -1,44 +1,16 @@
-﻿# Polymarket Tracker
+# React + Vite
 
-Este proyecto es una aplicación para rastrear y visualizar operaciones (trades) en Polymarket, una plataforma de mercados de predicción descentralizados. Permite consultar, analizar y mostrar información relevante sobre los trades realizados en diferentes mercados, facilitando el seguimiento y análisis de tendencias.
+This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
-### API Polymarket
-https://data-api.polymarket.com/trades?user=0xe1c70472413b93FD6FFEDF45869c7AA0A909ACd5&limit=500&offset=0&takerOnly=false
+Currently, two official plugins are available:
 
-## Características principales
-- Consulta de operaciones recientes en Polymarket.
-- Visualización de datos de trades en tiempo real o bajo demanda.
-- Interfaz amigable construida con React y Vite.
-- API propia para obtener y procesar datos de trades.
+- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
+- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
 
-## Estructura del proyecto
-- `src/`: Código fuente del frontend (React).
-- `api/`: Endpoints para la obtención de datos de trades.
-- `index.html`, `vite.config.js`, `package.json`: Configuración general del proyecto.
+## React Compiler
 
-## Requisitos previos
-- Node.js >= 18.x
-- npm >= 9.x
+The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
 
-## Instalación y ejecución
+## Expanding the ESLint configuration
 
-1. Instala las dependencias:
-   ```powershell
-   npm install
-   ```
-
-2. Inicia el servidor de desarrollo:
-   ```powershell
-   npm run dev
-   ```
-
-3. Accede a la aplicación en tu navegador en la URL que aparece en consola (por defecto: http://localhost:5173).
-
-## Despliegue
-
-El proyecto está preparado para ser desplegado en Vercel. Puedes modificar `vercel.json` según tus necesidades.
-
-## Licencia
-
-MIT
-
+If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.

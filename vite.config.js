@@ -5,11 +5,11 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/trades-proxy': {
+      '/api/polymarket': {
         target: 'https://data-api.polymarket.com',
         changeOrigin: true,
-        rewrite: path => path.replace('/trades-proxy', '/trades'),
-      }
-    }
-  }
+        rewrite: (path) => path.replace(/^\/api\/polymarket/, ''),
+      },
+    },
+  },
 })

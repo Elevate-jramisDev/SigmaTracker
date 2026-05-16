@@ -78,7 +78,7 @@ export default function App() {
   async function load(addr) {
     setLoading(true); setError(null);
     try {
-      const url = `/Sapi/polymarket/trades?user=${addr}&limit=500&offset=0&takerOnly=false`;
+      const url = `/api/polymarket/trades?user=${addr}&limit=500&offset=0&takerOnly=false`;
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setTrades(await res.json());

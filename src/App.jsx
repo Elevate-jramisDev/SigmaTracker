@@ -22,25 +22,47 @@ function getCrypto(title = "") {
   return { key: "other", ...FALLBACK };
 }
 
-// En groupByMarket, propaga el icono de la trade al objeto de mercado
 function groupByMarket(trades) {
   const map = {};
   for (const t of trades) {
     const id = t.conditionId;
-    if (!map[id]) map[id] = { ...t, buyCost: 0, sellRevenue: 0, trades: [], lastTs: 0, icon: t.icon };
+    if (!map[id]) map[id] = {
+      ...t,
+      buyCost: 0, sellRevenue: 0,
+      totalFees: 0,
+      totalBuySize: 0, totalSellSize: 0,
+      numBuys: 0, numSells: 0,
+      trades: [], lastTs: 0, firstTs: Infinity, icon: t.icon,
+    };
     const m = map[id];
     const val = t.size * t.price;
-    if (t.side === "BUY") m.buyCost += val;
-    else m.sellRevenue += val;
+    const fee = val * ((t.feeRateBps || 0) / 10000);
+    m.totalFees += fee;
+    if (t.side === "BUY") {
+      m.buyCost += val;
+      m.totalBuySize += t.size;
+      m.numBuys++;
+    } else {
+      m.sellRevenue += val;
+      m.totalSellSize += t.size;
+      m.numSells++;
+    }
     m.trades.push(t);
     if (t.timestamp > m.lastTs) m.lastTs = t.timestamp;
-    // Si el icono no está definido, lo actualiza
+    if (t.timestamp < m.firstTs) m.firstTs = t.timestamp;
     if (!m.icon && t.icon) m.icon = t.icon;
   }
   return Object.values(map).map(m => {
-    const pnl = m.sellRevenue - m.buyCost;
-    const pct = m.buyCost > 0 ? (pnl / m.buyCost) * 100 : 0;
-    return { ...m, pnl, pct };
+    const grossPnl     = m.sellRevenue - m.buyCost;
+    const pnl          = grossPnl - m.totalFees;
+    const pct          = m.buyCost > 0 ? (pnl / m.buyCost) * 100 : 0;
+    const feeImpact    = grossPnl > 0 ? (m.totalFees / grossPnl) * 100 : 0;
+    const avgEntryPrice = m.totalBuySize  > 0 ? m.buyCost      / m.totalBuySize  : 0;
+    const avgExitPrice  = m.totalSellSize > 0 ? m.sellRevenue  / m.totalSellSize : 0;
+    const totalTrades  = m.numBuys + m.numSells;
+    const avgTradeSize = totalTrades > 0 ? (m.totalBuySize + m.totalSellSize) / totalTrades : 0;
+    const duration     = (m.firstTs < Infinity && m.lastTs > m.firstTs) ? m.lastTs - m.firstTs : 0;
+    return { ...m, grossPnl, pnl, pct, feeImpact, avgEntryPrice, avgExitPrice, avgTradeSize, duration };
   }).sort((a, b) => b.lastTs - a.lastTs);
 }
 
@@ -48,32 +70,44 @@ function coinSummary(markets) {
   const acc = {};
   for (const m of markets) {
     const { key } = getCrypto(m.title);
-    if (!acc[key]) acc[key] = { key, pnl: 0, cost: 0 };
-    acc[key].pnl  += m.pnl;
-    acc[key].cost += m.buyCost;
+    if (!acc[key]) acc[key] = { key, pnl: 0, grossPnl: 0, fees: 0, cost: 0, wins: 0, total: 0 };
+    acc[key].pnl      += m.pnl;
+    acc[key].grossPnl += m.grossPnl;
+    acc[key].fees     += m.totalFees;
+    acc[key].cost     += m.buyCost;
+    acc[key].total++;
+    if (m.pnl > 0) acc[key].wins++;
   }
   return Object.values(acc);
 }
 
-const fmt    = n => (n >= 0 ? "+" : "") + n.toFixed(3);
-const fmtPct = n => (n >= 0 ? "+" : "") + n.toFixed(1) + "%";
-const fmtDate = ts => new Date(ts * 1000).toLocaleDateString("es-ES", {
-  month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
+const fmt      = n => (n >= 0 ? "+" : "") + n.toFixed(3);
+const fmtPct   = n => (n >= 0 ? "+" : "") + n.toFixed(1) + "%";
+const fmtDate  = ts => new Date(ts * 1000).toLocaleDateString("es-ES", {
+  month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
 });
+const fmtDuration = secs => {
+  if (!secs || secs <= 0) return "< 1m";
+  if (secs < 60)    return `${secs}s`;
+  if (secs < 3600)  return `${Math.floor(secs / 60)}m`;
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`;
+  return `${Math.floor(secs / 86400)}d ${Math.floor((secs % 86400) / 3600)}h`;
+};
 
 export default function App() {
   const [inputWallet, setInputWallet] = useState(DEFAULT_WALLET);
-  const [trades,  setTrades]  = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState(null);
-  const [filter,  setFilter]  = useState("all");
-  // Fecha por defecto: hoy en formato yyyy-mm-dd
+  const [trades,   setTrades]   = useState([]);
+  const [loading,  setLoading]  = useState(false);
+  const [error,    setError]    = useState(null);
+  const [filter,   setFilter]   = useState("all");
+  const [expanded, setExpanded] = useState({});
+  const [tokensOpen, setTokensOpen] = useState(false);
+
   const today = new Date();
-  const yyyy = today.getFullYear();
-  const mm = String(today.getMonth() + 1).padStart(2, '0');
-  const dd = String(today.getDate()).padStart(2, '0');
-  const defaultDate = `${yyyy}-${mm}-${dd}`;
+  const defaultDate = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
   const [filterDate, setFilterDate] = useState(defaultDate);
+
+  const toggleExpand = id => setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
 
   async function load(addr) {
     setLoading(true); setError(null);
@@ -92,204 +126,376 @@ export default function App() {
   useEffect(() => { load(DEFAULT_WALLET); }, []);
 
   const markets  = groupByMarket(trades);
-  // Filtrado por tipo y fecha
   const filtered = markets.filter(m => {
-    if (filter === "win" && m.pnl <= 0) return false;
+    if (filter === "win"  && m.pnl <= 0) return false;
     if (filter === "loss" && m.pnl >= 0) return false;
-    if (!["all", "win", "loss"].includes(filter) && getCrypto(m.title).key !== filter) return false;
+    if (!["all","win","loss"].includes(filter) && getCrypto(m.title).key !== filter) return false;
     if (filterDate) {
       const marketDate = new Date(m.lastTs * 1000).toISOString().slice(0, 10);
       if (marketDate !== filterDate) return false;
     }
     return true;
   });
-  // Los cuadros resumen usan los mercados filtrados
-  const coins    = coinSummary(filtered);
-  const totalPnl  = filtered.reduce((s, m) => s + m.pnl, 0);
-  const totalCost = filtered.reduce((s, m) => s + m.buyCost, 0);
-  const totalPct  = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
-  const winMarkets  = filtered.filter(m => m.pnl > 0);
-  const lossMarkets = filtered.filter(m => m.pnl < 0);
-  const winners   = winMarkets.length;
-  const losers    = lossMarkets.length;
-  const total     = winners + losers;
-  const winrate   = total > 0 ? (winners / total) * 100 : 0;
-  const avgWin    = winners > 0 ? winMarkets.reduce((s, m) => s + m.pnl, 0) / winners : 0;
-  const avgLoss   = losers  > 0 ? Math.abs(lossMarkets.reduce((s, m) => s + m.pnl, 0) / losers) : 0;
-  const grossWin  = winMarkets.reduce((s, m) => s + m.pnl, 0);
-  const grossLoss = Math.abs(lossMarkets.reduce((s, m) => s + m.pnl, 0));
+
+  const coins          = coinSummary(filtered);
+  const totalPnl       = filtered.reduce((s, m) => s + m.pnl,      0);
+  const totalGrossPnl  = filtered.reduce((s, m) => s + m.grossPnl, 0);
+  const totalFees      = filtered.reduce((s, m) => s + m.totalFees,0);
+  const totalCost      = filtered.reduce((s, m) => s + m.buyCost,  0);
+  const totalPct       = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
+  const globalFeeImpact = totalGrossPnl > 0 ? (totalFees / totalGrossPnl) * 100 : 0;
+
+  const winMarkets   = filtered.filter(m => m.pnl > 0);
+  const lossMarkets  = filtered.filter(m => m.pnl < 0);
+  const winners      = winMarkets.length;
+  const losers       = lossMarkets.length;
+  const total        = winners + losers;
+  const winrate      = total > 0 ? (winners / total) * 100 : 0;
+  const avgWin       = winners > 0 ? winMarkets.reduce((s,m) => s+m.pnl, 0) / winners : 0;
+  const avgLoss      = losers  > 0 ? Math.abs(lossMarkets.reduce((s,m) => s+m.pnl, 0) / losers) : 0;
+  const grossWin     = winMarkets.reduce((s,m) => s+m.pnl, 0);
+  const grossLoss    = Math.abs(lossMarkets.reduce((s,m) => s+m.pnl, 0));
   const profitFactor = grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? Infinity : 0;
 
-  // Calcular balance total de la wallet (suma de todos los SELL menos los BUY)
-  const walletBalance = trades.reduce((acc, t) => acc + (t.side === "BUY" ? -t.size * t.price : t.size * t.price), 0);
+  const bestMarket   = filtered.reduce((b, m) => m.pnl > (b?.pnl ?? -Infinity) ? m : b, null);
+  const worstMarket  = filtered.reduce((w, m) => m.pnl < (w?.pnl ??  Infinity) ? m : w, null);
+  const maxWin       = bestMarket  ? bestMarket.pnl  : 0;
+  const maxLoss      = worstMarket ? worstMarket.pnl : 0;
+
+  // Racha actual
+  const streakMkts = [...filtered].filter(m => m.pnl !== 0).sort((a,b) => b.lastTs - a.lastTs);
+  let streak = 0, streakType = null;
+  for (const m of streakMkts) {
+    const type = m.pnl > 0 ? "win" : "loss";
+    if (!streakType) { streakType = type; streak = 1; }
+    else if (type === streakType) streak++;
+    else break;
+  }
+  const streakLabel = streakType === "win"
+    ? `🔥 ${streak} ganadas`
+    : streakType === "loss"
+    ? `❄️ ${streak} pérdidas`
+    : "-";
+
+  const walletBalance = trades.reduce((acc, t) =>
+    acc + (t.side === "BUY" ? -t.size * t.price : t.size * t.price), 0);
 
   return (
     <div className="app">
       {/* ── Header ── */}
       <header className="header">
-        <div className="header-top" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div className="header-top" style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
             <span className="dot" />
             <span className="header-label">Trade Tracker</span>
           </div>
         </div>
         <div className="search-row">
-          <input
-            className="wallet-input"
-            value={inputWallet}
+          <input className="wallet-input" value={inputWallet}
             onChange={e => setInputWallet(e.target.value)}
             placeholder="0x..."
-            onKeyDown={e => e.key === "Enter" && load(inputWallet)}
-          />
+            onKeyDown={e => e.key === "Enter" && load(inputWallet)} />
           <button className="btn-load" onClick={() => load(inputWallet)}>Cargar</button>
         </div>
       </header>
 
-      {/* ── States ── */}
       {loading && <div className="state">⟳ Cargando trades…</div>}
       {error   && <div className="state error">⚠ {error}</div>}
 
       {!loading && !error && trades.length > 0 && (
         <main className="main">
-          {/* Summary cards */}
+
+          {/* ── Summary cards ── */}
           <div className="cards">
             {[
-              { label: "P&L Total",  val: fmt(totalPnl) + " $",       col: totalPnl >= 0 ? "#4ade80" : "#f87171" },
-              { label: "Retorno",    val: fmtPct(totalPct),            col: totalPct >= 0 ? "#4ade80" : "#f87171" },
-              { label: "Mercados",   val: markets.length,              col: "#94a3b8" },
-              { label: "Ganadoras",     val: `${winners}`,                                         col: "#4ade80" },
-              { label: "Perdedoras",    val: `${losers}`,                                          col: "#f87171" },
-              { label: "Winrate",       val: `${winrate.toFixed(1)}%`,                             col: winrate >= 50 ? "#4ade80" : "#f87171" },
-              { label: "Profit Factor", val: isFinite(profitFactor) ? profitFactor.toFixed(2) : "∞", col: profitFactor >= 1 ? "#4ade80" : "#f87171" },
-              { label: "Avg Win / Loss", val: `${avgWin.toFixed(2)}$ / ${avgLoss.toFixed(2)}$`,   col: avgWin >= avgLoss ? "#4ade80" : "#fbbf24" },
-              { label: "Invertido",  val: totalCost.toFixed(1) + " $", col: "#94a3b8" },
-              { label: "Balance wallet", val: walletBalance.toFixed(2) + " $", col: "#fbbf24" },
+              { label:"P&L Neto",        val: fmt(totalPnl)+" $",                             col: totalPnl >= 0 ? "#4ade80":"#f87171" },
+              { label:"P&L Bruto",       val: fmt(totalGrossPnl)+" $",                        col: totalGrossPnl >= 0 ? "#4ade80":"#f87171" },
+              { label:"Fees totales",    val: "-"+totalFees.toFixed(3)+" $",                  col: "#fb923c" },
+              { label:"Retorno",         val: fmtPct(totalPct),                               col: totalPct >= 0 ? "#4ade80":"#f87171" },
+              { label:"Mercados",        val: markets.length,                                 col: "#94a3b8" },
+              { label:"Ganadoras",       val: `${winners}`,                                   col: "#4ade80" },
+              { label:"Perdedoras",      val: `${losers}`,                                    col: "#f87171" },
+              { label:"Winrate",         val: `${winrate.toFixed(1)}%`,                       col: winrate >= 50 ? "#4ade80":"#f87171" },
+              { label:"Profit Factor",   val: isFinite(profitFactor) ? profitFactor.toFixed(2) : "∞", col: profitFactor >= 1 ? "#4ade80":"#f87171" },
+              { label:"Avg Win / Loss",  val: `${avgWin.toFixed(2)}$ / ${avgLoss.toFixed(2)}$`, col: avgWin >= avgLoss ? "#4ade80":"#fbbf24" },
+              { label:"Mayor ganancia",  val: fmt(maxWin)+" $",                               col: "#4ade80" },
+              { label:"Mayor pérdida",   val: fmt(maxLoss)+" $",                              col: "#f87171" },
+              { label:"Racha actual",    val: streakLabel,                                    col: streakType==="win" ? "#4ade80" : streakType==="loss" ? "#f87171":"#94a3b8" },
+              { label:"Invertido",       val: totalCost.toFixed(1)+" $",                      col: "#94a3b8" },
+              { label:"Balance wallet",  val: walletBalance.toFixed(2)+" $",                  col: "#fbbf24" },
             ].map(c => (
               <div key={c.label} className="card">
                 <span className="card-label">{c.label}</span>
-                <span className="card-val" style={{ color: c.col }}>{c.val}</span>
+                <span className="card-val" style={{ color:c.col }}>{c.val}</span>
               </div>
             ))}
           </div>
 
-          {/* Filter pills */}
+          {/* ── Fee alert global ── */}
+          {totalFees > 0 && globalFeeImpact > 5 && (
+            <div className="fee-alert">
+              ⚠ Las fees consumen el <strong>{globalFeeImpact.toFixed(1)}%</strong> de tus ganancias brutas
+            </div>
+          )}
+
+          {/* ── P&L por token ── */}
+          {coins.length > 0 && (
+            <div className="token-section">
+              <div className="section-title" style={{ display:"flex", alignItems:"center", justifyContent:"space-between", cursor:"pointer", userSelect:"none" }}
+                onClick={() => setTokensOpen(o => !o)}>
+                <span>P&amp;L por token</span>
+                <span style={{ fontSize:10, color:"#334155" }}>{tokensOpen ? "▲ minimizar" : "▼ expandir"}</span>
+              </div>
+              {tokensOpen && (
+                <div className="token-grid">
+                {coins.map(c => {
+                    const { sym, col } = getCrypto(c.key);
+                    const wr       = c.total > 0 ? (c.wins / c.total) * 100 : 0;
+                    const pnlColor = c.pnl >= 0 ? "#4ade80" : "#f87171";
+                    const wrColor  = wr    >= 50 ? "#4ade80" : "#f87171";
+                    const wrLabel  = `${wr.toFixed(0)}% (${c.wins}/${c.total})`;
+                    return (
+                      <div key={c.key} className="token-card" style={{ borderColor: col.border, background: col.bg }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                          <span style={{ color: col.text, fontSize: 20 }}>{sym}</span>
+                          <span style={{ color: col.text, fontWeight: 700, textTransform: "uppercase", fontSize: 13 }}>{c.key}</span>
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                            <span style={{ color: "#64748b" }}>P&amp;L Neto</span>
+                            <span style={{ color: pnlColor, fontWeight: 700 }}>{fmt(c.pnl)} $</span>
+                          </div>
+                          {c.fees > 0 && (
+                            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                              <span style={{ color: "#64748b" }}>Fees</span>
+                              <span style={{ color: "#fb923c" }}>-{c.fees.toFixed(3)} $</span>
+                            </div>
+                          )}
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                            <span style={{ color: "#64748b" }}>Winrate</span>
+                            <span style={{ color: wrColor }}>{wrLabel}</span>
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                            <span style={{ color: "#64748b" }}>Invertido</span>
+                            <span style={{ color: "#94a3b8" }}>{c.cost.toFixed(2)} $</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Filter pills ── */}
           <div className="pills">
-            {["all", "win", "loss"].map(f => (
-              <button key={f} className={`pill ${filter === f ? "pill-active" : ""}`} onClick={() => setFilter(f)}>
-                {f === "all" ? "Todos" : f === "win" ? "✓ Ganadoras" : "✗ Perdedoras"}
+            {["all","win","loss"].map(f => (
+              <button key={f} className={`pill ${filter===f?"pill-active":""}`} onClick={() => setFilter(f)}>
+                {f==="all"?"Todos":f==="win"?"✓ Ganadoras":"✗ Perdedoras"}
               </button>
             ))}
             {coins.map(c => {
               const { sym, col } = getCrypto(c.key);
               const active = filter === c.key;
               return (
-                <button key={c.key}
-                  className="pill pill-coin"
-                  style={{
-                    background: active ? col.border + "44" : "",
-                    borderColor: active ? col.border : "",
-                    color: active ? col.text : "",
-                  }}
-                  onClick={() => setFilter(active ? "all" : c.key)}>
-                  <span style={{ color: col.text }}>{sym}</span>
-                  <span style={{ textTransform: "uppercase" }}>{c.key}</span>
-                  <span style={{ color: c.pnl >= 0 ? "#4ade80" : "#f87171" }}>{fmt(c.pnl)}$</span>
+                <button key={c.key} className="pill pill-coin"
+                  style={{ background:active?col.border+"44":"", borderColor:active?col.border:"", color:active?col.text:"" }}
+                  onClick={() => setFilter(active?"all":c.key)}>
+                  <span style={{ color:col.text }}>{sym}</span>
+                  <span style={{ textTransform:"uppercase" }}>{c.key}</span>
+                  <span style={{ color:c.pnl>=0?"#4ade80":"#f87171" }}>{fmt(c.pnl)}$</span>
                 </button>
               );
             })}
           </div>
-          {/* Input de fecha para filtrar mercados */}
-          <div style={{ margin: "12px 0 0 0", display: "flex", alignItems: "center" }}>
-            <label htmlFor="filter-date" style={{ marginRight: 8, fontSize: 13, color: "#64748b" }}>Fecha mercado:</label>
-            <input
-              id="filter-date"
-              type="date"
-              value={filterDate}
+
+          {/* ── Date filter ── */}
+          <div style={{ margin:"12px 0 0 0", display:"flex", alignItems:"center" }}>
+            <label htmlFor="filter-date" style={{ marginRight:8, fontSize:13, color:"#64748b" }}>Fecha mercado:</label>
+            <input id="filter-date" type="date" value={filterDate}
               onChange={e => setFilterDate(e.target.value)}
-              style={{ fontSize: 13, padding: "2px 8px" }}
-              max={defaultDate}
-            />
+              style={{ fontSize:13, padding:"2px 8px" }} max={defaultDate} />
             {filterDate && filterDate !== defaultDate && (
-              <button onClick={() => setFilterDate(defaultDate)} style={{ marginLeft: 8, fontSize: 13 }}>✕</button>
+              <button onClick={() => setFilterDate(defaultDate)} style={{ marginLeft:8, fontSize:13 }}>✕</button>
             )}
           </div>
 
-          {/* Market list */}
-                              {/* Filtros activos visuales */}
-                              {(filter !== "all" || (filterDate && filterDate !== defaultDate)) && (
-                                <div style={{ margin: "10px 0 10px 0", display: "flex", gap: 10, flexWrap: "wrap" }}>
-                                  {filter !== "all" && (
-                                    <span style={{ background: "#1e2535", color: "#60a5fa", borderRadius: 4, padding: "2px 8px", fontSize: 12 }}>
-                                      Filtro: {filter}
-                                    </span>
-                                  )}
-                                  {filterDate && filterDate !== defaultDate && (
-                                    <span style={{ background: "#1e2535", color: "#fbbf24", borderRadius: 4, padding: "2px 8px", fontSize: 12 }}>
-                                      Fecha: {filterDate}
-                                    </span>
-                                  )}
-                                </div>
-                              )}
+          {/* Active filter badges */}
+          {(filter !== "all" || (filterDate && filterDate !== defaultDate)) && (
+            <div style={{ margin:"10px 0", display:"flex", gap:10, flexWrap:"wrap" }}>
+              {filter !== "all" && (
+                <span style={{ background:"#1e2535", color:"#60a5fa", borderRadius:4, padding:"2px 8px", fontSize:12 }}>
+                  Filtro: {filter}
+                </span>
+              )}
+              {filterDate && filterDate !== defaultDate && (
+                <span style={{ background:"#1e2535", color:"#fbbf24", borderRadius:4, padding:"2px 8px", fontSize:12 }}>
+                  Fecha: {filterDate}
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* ── Market list ── */}
           <div className="market-list">
             {filtered.map(m => {
               const { sym, col } = getCrypto(m.title);
-              const win = m.pnl >= 0;
-              // Calcular precio de entrada promedio
-              // Tomar el price del primer BUY del mercado
+              const win     = m.pnl >= 0;
               const firstBuy = m.trades.find(t => t.side === "BUY");
-              const entryPrice = firstBuy ? firstBuy.price : 0;
+              const isOpen  = expanded[m.conditionId];
+
               return (
                 <div key={m.conditionId} className="market-row"
                   onMouseEnter={e => e.currentTarget.style.borderColor = col.border}
                   onMouseLeave={e => e.currentTarget.style.borderColor = "#1e2535"}>
-                  <div className="coin-icon" style={{ background: col.bg, borderColor: col.border, color: col.text }}>
-                    {m.icon ? (
-                      <img src={m.icon} alt="icono" style={{ width: 22, height: 22, objectFit: "contain" }} />
-                    ) : (
-                      sym
-                    )}
-                  </div>
-                  <div className="market-info">
-                    <div className="market-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span>{m.title}</span>
-                      {firstBuy && firstBuy.outcome && (
+
+                  {/* ── Fila principal (clickable) ── */}
+                  <div style={{ display:"flex", alignItems:"center", gap:14, width:"100%", cursor:"pointer" }}
+                    onClick={() => toggleExpand(m.conditionId)}>
+
+                    <div className="coin-icon" style={{ background:col.bg, borderColor:col.border, color:col.text }}>
+                      {m.icon
+                        ? <img src={m.icon} alt="icono" style={{ width:22, height:22, objectFit:"contain" }} />
+                        : sym}
+                    </div>
+
+                    <div className="market-info">
+                      <div className="market-title" style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+                        <span>{m.title}</span>
+                        {firstBuy?.outcome && (
+                          <span style={{
+                            fontSize:12, fontWeight:700, borderRadius:4, padding:"1px 8px",
+                            background: firstBuy.outcome.toLowerCase()==="up" ? "#14532d88":"#7f1d1d88",
+                            color:      firstBuy.outcome.toLowerCase()==="up" ? "#4ade80":"#f87171",
+                            border:"1px solid",
+                            borderColor:firstBuy.outcome.toLowerCase()==="up" ? "#22c55e66":"#ef444466",
+                            letterSpacing:1,
+                          }}>
+                            {firstBuy.outcome.toLowerCase()==="up" ? "↑ UP":"↓ DOWN"}
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ display:"flex", gap:8, marginTop:4, flexWrap:"wrap", alignItems:"center" }}>
+                        <span style={{ fontSize:11, color:"#64748b" }}>{fmtDate(m.lastTs)}</span>
+                        <span style={{ fontSize:11, color:"#334155" }}>·</span>
+                        <span style={{ fontSize:11, color:"#64748b" }}>
+                          {m.trades.length} trades &nbsp;
+                          <span style={{ color:"#4ade8099" }}>{m.numBuys}B</span>
+                          {" / "}
+                          <span style={{ color:"#f8717199" }}>{m.numSells}S</span>
+                        </span>
+                        <span style={{ fontSize:11, color:"#334155" }}>·</span>
+                        <span style={{ fontSize:11, color:"#64748b" }}>Invertido: {m.buyCost.toFixed(2)}$</span>
+                        {m.duration > 0 && <>
+                          <span style={{ fontSize:11, color:"#334155" }}>·</span>
+                          <span style={{ fontSize:11, color:"#64748b" }}>⏱ {fmtDuration(m.duration)}</span>
+                        </>}
+                      </div>
+                    </div>
+
+                    {/* P&L column */}
+                    <div className="market-pnl" style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:3, minWidth:160 }}>
+                      {m.totalFees > 0 && (
+                        <div style={{ display:"flex", gap:10, fontSize:11 }}>
+                          <span style={{ color:"#475569" }}>Bruto:&nbsp;<span style={{ color:"#94a3b8" }}>{fmt(m.grossPnl)}$</span></span>
+                          <span style={{ color:"#475569" }}>Fees:&nbsp;<span style={{ color:"#fb923c" }}>-{m.totalFees.toFixed(3)}$</span></span>
+                        </div>
+                      )}
+                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                        <span className="pnl-val" style={{ color:win?"#4ade80":"#f87171" }}>{fmt(m.pnl)} $</span>
+                        <span className="pnl-badge" style={{
+                          background:  win?"#14532d44":"#7f1d1d44",
+                          borderColor: win?"#22c55e44":"#ef444444",
+                          color:       win?"#4ade80":"#f87171",
+                          fontSize:13, fontWeight:600,
+                        }}>{fmtPct(m.pct)}</span>
+                      </div>
+                      {m.totalFees > 0 && m.feeImpact > 10 && (
                         <span style={{
-                          fontSize: 12,
-                          fontWeight: 700,
-                          borderRadius: 4,
-                          padding: "1px 8px",
-                          background: firstBuy.outcome.toLowerCase() === "up" ? "#14532d88" : "#7f1d1d88",
-                          color: firstBuy.outcome.toLowerCase() === "up" ? "#4ade80" : "#f87171",
-                          border: "1px solid",
-                          borderColor: firstBuy.outcome.toLowerCase() === "up" ? "#22c55e66" : "#ef444466",
-                          letterSpacing: 1,
+                          fontSize:11, fontWeight:700, borderRadius:4, padding:"1px 6px",
+                          background:  m.feeImpact > 30 ? "#7c2d1244":"#1e2535",
+                          color:       m.feeImpact > 30 ? "#fb923c":"#94a3b8",
+                          border:"1px solid",
+                          borderColor: m.feeImpact > 30 ? "#fb923c66":"transparent",
+                          whiteSpace:"nowrap",
                         }}>
-                          {firstBuy.outcome.toLowerCase() === "up" ? "↑ UP" : "↓ DOWN"}
+                          ⚠ Fees consuming {m.feeImpact.toFixed(0)}% of profits
                         </span>
                       )}
-                      <span style={{ fontSize: 12, color: "#94a3b8", fontWeight: 500, background: "#1e2535", borderRadius: 4, padding: "1px 6px" }}>
-                        {firstBuy ? firstBuy.price.toFixed(3) : "-"} $
-                      </span>
-                      <span style={{ fontSize: 12, color: "#64748b", marginLeft: 10 }}>
-                        {fmtDate(m.lastTs)} · {m.trades.length} trades · {m.buyCost.toFixed(2)}$
-                      </span>
+                      <span style={{ fontSize:10, color:"#334155", marginTop:2 }}>{isOpen?"▲ cerrar":"▼ detalle"}</span>
                     </div>
-                    {/* Información movida a la línea del título */}
                   </div>
-                  <div className="market-pnl" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
 
-                      <span className="pnl-val" style={{ color: win ? "#4ade80" : "#f87171", marginRight: 10 }}>{fmt(m.pnl)} $</span>
-                      <span className="pnl-badge" style={{
-                        background:   win ? "#14532d44" : "#7f1d1d44",
-                        borderColor:  win ? "#22c55e44" : "#ef444444",
-                        color:        win ? "#4ade80"   : "#f87171",
-                        fontSize: 13,
-                        marginTop: 0,
-                        fontWeight: 600
-                      }}>{fmtPct(m.pct)}</span>
+                  {/* ── Panel expandido ── */}
+                  {isOpen && (
+                    <div style={{
+                      marginTop:14, paddingTop:14,
+                      borderTop:"1px solid #1e2535",
+                      width:"100%",
+                    }}>
+                      {/* Métricas en grid */}
+                      <div style={{
+                        display:"grid",
+                        gridTemplateColumns:"repeat(auto-fit, minmax(155px, 1fr))",
+                        gap:8, marginBottom:12,
+                      }}>
+                        {[
+                          { label:"P&L Bruto",            val:fmt(m.grossPnl)+" $",                      col:m.grossPnl>=0?"#4ade80":"#f87171" },
+                          { label:"Fees pagadas",          val:"-"+m.totalFees.toFixed(4)+" $",           col:"#fb923c" },
+                          { label:"P&L Neto",              val:fmt(m.pnl)+" $",                           col:m.pnl>=0?"#4ade80":"#f87171" },
+                          { label:"Compras",               val:`${m.numBuys} (${m.buyCost.toFixed(2)}$)`, col:"#94a3b8" },
+                          { label:"Ventas",                val:`${m.numSells} (${m.sellRevenue.toFixed(2)}$)`, col:"#94a3b8" },
+                          { label:"Precio medio entrada",  val:m.avgEntryPrice>0 ? m.avgEntryPrice.toFixed(4)+" $":"-", col:"#60a5fa" },
+                          { label:"Precio medio salida",   val:m.avgExitPrice>0  ? m.avgExitPrice.toFixed(4)+" $":"-",  col:"#a78bfa" },
+                          { label:"Tamaño medio trade",    val:m.avgTradeSize>0  ? m.avgTradeSize.toFixed(2):"0",        col:"#94a3b8" },
+                          { label:"Primer trade",          val:m.firstTs<Infinity ? fmtDate(m.firstTs):"-",              col:"#64748b" },
+                          { label:"Último trade",          val:fmtDate(m.lastTs),                                        col:"#64748b" },
+                          { label:"Duración",              val:fmtDuration(m.duration),                                  col:"#fbbf24" },
+                        ].map(d => (
+                          <div key={d.label} style={{
+                            background:"#0d0f14", borderRadius:6, padding:"8px 10px",
+                            border:"1px solid #1e2535",
+                          }}>
+                            <div style={{ fontSize:10, color:"#475569", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:3 }}>{d.label}</div>
+                            <div style={{ fontSize:13, fontWeight:700, color:d.col }}>{d.val}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Log de trades individuales */}
+                      <div style={{ background:"#0d0f14", borderRadius:6, padding:"10px 12px", border:"1px solid #1e2535" }}>
+                        <div style={{ fontSize:10, color:"#475569", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:8 }}>
+                          Trades individuales
+                        </div>
+                        <div style={{ display:"flex", flexDirection:"column", gap:2 }}>
+                          {[...m.trades].sort((a,b) => a.timestamp - b.timestamp).map((t, i) => (
+                            <div key={i} style={{
+                              display:"flex", gap:12, alignItems:"center",
+                              fontSize:11, padding:"4px 0",
+                              borderBottom: i < m.trades.length-1 ? "1px solid #1e253560":"none",
+                            }}>
+                              <span style={{ color:t.side==="BUY"?"#4ade80":"#f87171", fontWeight:700, minWidth:32 }}>
+                                {t.side}
+                              </span>
+                              <span style={{ color:"#94a3b8", minWidth:52, fontVariantNumeric:"tabular-nums" }}>
+                                {t.price?.toFixed(4)} $
+                              </span>
+                              <span style={{ color:"#64748b", minWidth:62 }}>
+                                ×{t.size?.toFixed(2)}
+                              </span>
+                              <span style={{ color:"#475569" }}>{fmtDate(t.timestamp)}</span>
+                              {t.feeRateBps > 0 && (
+                                <span style={{ color:"#fb923c", marginLeft:"auto" }}>
+                                  fee {(t.feeRateBps/100).toFixed(2)}%
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               );
             })}

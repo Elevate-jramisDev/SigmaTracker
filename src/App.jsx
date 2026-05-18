@@ -240,6 +240,21 @@ export default function App() {
                   <div className="market-info">
                     <div className="market-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <span>{m.title}</span>
+                      {firstBuy && firstBuy.outcome && (
+                        <span style={{
+                          fontSize: 12,
+                          fontWeight: 700,
+                          borderRadius: 4,
+                          padding: "1px 8px",
+                          background: firstBuy.outcome.toLowerCase() === "up" ? "#14532d88" : "#7f1d1d88",
+                          color: firstBuy.outcome.toLowerCase() === "up" ? "#4ade80" : "#f87171",
+                          border: "1px solid",
+                          borderColor: firstBuy.outcome.toLowerCase() === "up" ? "#22c55e66" : "#ef444466",
+                          letterSpacing: 1,
+                        }}>
+                          {firstBuy.outcome.toLowerCase() === "up" ? "↑ UP" : "↓ DOWN"}
+                        </span>
+                      )}
                       <span style={{ fontSize: 12, color: "#94a3b8", fontWeight: 500, background: "#1e2535", borderRadius: 4, padding: "1px 6px" }}>
                         {firstBuy ? firstBuy.price.toFixed(3) : "-"} $
                       </span>

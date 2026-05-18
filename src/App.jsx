@@ -108,8 +108,17 @@ export default function App() {
   const totalPnl  = filtered.reduce((s, m) => s + m.pnl, 0);
   const totalCost = filtered.reduce((s, m) => s + m.buyCost, 0);
   const totalPct  = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
-  const winners   = filtered.filter(m => m.pnl > 0).length;
-  const losers    = filtered.filter(m => m.pnl < 0).length;
+  const winMarkets  = filtered.filter(m => m.pnl > 0);
+  const lossMarkets = filtered.filter(m => m.pnl < 0);
+  const winners   = winMarkets.length;
+  const losers    = lossMarkets.length;
+  const total     = winners + losers;
+  const winrate   = total > 0 ? (winners / total) * 100 : 0;
+  const avgWin    = winners > 0 ? winMarkets.reduce((s, m) => s + m.pnl, 0) / winners : 0;
+  const avgLoss   = losers  > 0 ? Math.abs(lossMarkets.reduce((s, m) => s + m.pnl, 0) / losers) : 0;
+  const grossWin  = winMarkets.reduce((s, m) => s + m.pnl, 0);
+  const grossLoss = Math.abs(lossMarkets.reduce((s, m) => s + m.pnl, 0));
+  const profitFactor = grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? Infinity : 0;
 
   // Calcular balance total de la wallet (suma de todos los SELL menos los BUY)
   const walletBalance = trades.reduce((acc, t) => acc + (t.side === "BUY" ? -t.size * t.price : t.size * t.price), 0);
@@ -148,8 +157,11 @@ export default function App() {
               { label: "P&L Total",  val: fmt(totalPnl) + " $",       col: totalPnl >= 0 ? "#4ade80" : "#f87171" },
               { label: "Retorno",    val: fmtPct(totalPct),            col: totalPct >= 0 ? "#4ade80" : "#f87171" },
               { label: "Mercados",   val: markets.length,              col: "#94a3b8" },
-              { label: "Ganadoras",  val: winners,                     col: "#4ade80" },
-              { label: "Perdedoras", val: losers,                      col: "#f87171" },
+              { label: "Ganadoras",     val: `${winners}`,                                         col: "#4ade80" },
+              { label: "Perdedoras",    val: `${losers}`,                                          col: "#f87171" },
+              { label: "Winrate",       val: `${winrate.toFixed(1)}%`,                             col: winrate >= 50 ? "#4ade80" : "#f87171" },
+              { label: "Profit Factor", val: isFinite(profitFactor) ? profitFactor.toFixed(2) : "∞", col: profitFactor >= 1 ? "#4ade80" : "#f87171" },
+              { label: "Avg Win / Loss", val: `${avgWin.toFixed(2)}$ / ${avgLoss.toFixed(2)}$`,   col: avgWin >= avgLoss ? "#4ade80" : "#fbbf24" },
               { label: "Invertido",  val: totalCost.toFixed(1) + " $", col: "#94a3b8" },
               { label: "Balance wallet", val: walletBalance.toFixed(2) + " $", col: "#fbbf24" },
             ].map(c => (

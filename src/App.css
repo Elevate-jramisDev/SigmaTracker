@@ -127,3 +127,69 @@ body { background: #0d0f14; color: #e2e8f0; font-family: 'Inter', system-ui, san
   min-width: 160px;
   flex: 1;
 }
+
+/* ── Mobile (≤ 520px · iPhone Pro Max y similares) ── */
+@media (max-width: 520px) {
+
+  /* Header & main: menos padding lateral */
+  .header { padding: 14px 12px; }
+  .main   { padding: 12px 10px; }
+
+  /* Cards: 2 columnas */
+  .cards {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .card       { padding: 10px 12px; }
+  .card-label { font-size: 10px; }
+  .card-val   { font-size: 14px; }
+
+  /* Mercado row */
+  .market-row { padding: 10px 10px; }
+
+  /* Cabecera clickable: permitir que el bloque P&L salte debajo */
+  .market-row > div:first-child {
+    flex-wrap: wrap !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
+  }
+
+  /* Icono e info: se quedan en la misma línea */
+  .coin-icon    { flex-shrink: 0; }
+  .market-info  { flex: 1; min-width: 0; }
+
+  /* Título: permitir que envuelva en varias líneas */
+  .market-title {
+    font-size: 12px;
+    white-space: normal   !important;
+    overflow:    visible  !important;
+    text-overflow: unset  !important;
+    line-height: 1.4;
+  }
+
+  /* P&L: ocupa línea completa debajo del título */
+  .market-pnl {
+    min-width:      0     !important;
+    width:          100%  !important;
+    flex-direction: row   !important;
+    flex-wrap:      wrap  !important;
+    align-items:    center !important;
+    justify-content: space-between !important;
+    gap: 6px !important;
+    padding-top: 6px;
+    border-top: 1px solid #1e253580;
+    margin-top: 4px;
+  }
+
+  .pnl-val   { font-size: 14px; }
+  .pnl-badge { font-size: 11px; }
+
+  /* Pills: tamaño reducido */
+  .pill      { padding: 4px 10px; font-size: 11px; }
+  .pill-coin { gap: 4px; }
+
+  /* Token cards: columna única */
+  .token-grid { flex-direction: column; }
+  .token-card { min-width: 0; }
+}

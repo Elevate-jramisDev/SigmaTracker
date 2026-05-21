@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import "./App.css";
 
 const DEFAULT_WALLET = "0xe1c70472413b93FD6FFEDF45869c7AA0A909ACd5";
@@ -99,13 +99,33 @@ export default function App() {
   const [trades,   setTrades]   = useState([]);
   const [loading,  setLoading]  = useState(false);
   const [error,    setError]    = useState(null);
-  const [filter,   setFilter]   = useState("all");
-  const [expanded, setExpanded] = useState({});
+  const [filter,     setFilter]     = useState("all");
+  const [expanded,   setExpanded]   = useState({});
   const [tokensOpen, setTokensOpen] = useState(false);
+  const [timeFilter, setTimeFilter] = useState("all");
 
   const today = new Date();
   const defaultDate = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
   const [filterDate, setFilterDate] = useState(defaultDate);
+
+  const TIME_OPTIONS = [
+    { key: "1h",  label: "1h",   secs: 3600 },
+    { key: "4h",  label: "4h",   secs: 4 * 3600 },
+    { key: "6h",  label: "6h",   secs: 6 * 3600 },
+    { key: "12h", label: "12h",  secs: 12 * 3600 },
+    { key: "24h", label: "24h",  secs: 24 * 3600 },
+    { key: "7d",  label: "7d",   secs: 7 * 86400 },
+    { key: "30d", label: "30d",  secs: 30 * 86400 },
+  ];
+
+  function selectTimeFilter(key) {
+    setTimeFilter(key);
+    if (key !== "all") setFilterDate(""); // limpiar fecha exacta
+  }
+  function selectDate(val) {
+    setFilterDate(val);
+    if (val) setTimeFilter("all"); // limpiar ventana temporal
+  }
 
   const toggleExpand = id => setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
 
@@ -126,11 +146,17 @@ export default function App() {
   useEffect(() => { load(DEFAULT_WALLET); }, []);
 
   const markets  = groupByMarket(trades);
+  // nowSecs en useMemo para no llamar Date.now() impure durante cada render
+  const nowSecs  = useMemo(() => Math.floor(Date.now() / 1000), [timeFilter]);
   const filtered = markets.filter(m => {
     if (filter === "win"  && m.pnl <= 0) return false;
     if (filter === "loss" && m.pnl >= 0) return false;
     if (!["all","win","loss"].includes(filter) && getCrypto(m.title).key !== filter) return false;
-    if (filterDate) {
+    // Filtro ventana temporal (tiene prioridad sobre fecha exacta)
+    if (timeFilter !== "all") {
+      const opt = TIME_OPTIONS.find(o => o.key === timeFilter);
+      if (opt && m.lastTs < nowSecs - opt.secs) return false;
+    } else if (filterDate) {
       const marketDate = new Date(m.lastTs * 1000).toISOString().slice(0, 10);
       if (marketDate !== filterDate) return false;
     }
@@ -210,7 +236,7 @@ export default function App() {
             {[
               { label:"P&L Neto",        val: fmt(totalPnl)+" $",                             col: totalPnl >= 0 ? "#4ade80":"#f87171" },
               { label:"P&L Bruto",       val: fmt(totalGrossPnl)+" $",                        col: totalGrossPnl >= 0 ? "#4ade80":"#f87171" },
-              { label:"Fees totales",    val: "-"+totalFees.toFixed(3)+" $",                  col: "#fb923c" },
+              /*{ label:"Fees totales",    val: "-"+totalFees.toFixed(3)+" $",                  col: "#fb923c" },*/
               { label:"Retorno",         val: fmtPct(totalPct),                               col: totalPct >= 0 ? "#4ade80":"#f87171" },
               { label:"Mercados",        val: markets.length,                                 col: "#94a3b8" },
               { label:"Ganadoras",       val: `${winners}`,                                   col: "#4ade80" },
@@ -310,30 +336,70 @@ export default function App() {
             })}
           </div>
 
+          {/* ── Time filter pills ── */}
+          <div style={{ display:"flex", flexWrap:"wrap", gap:6, margin:"0 0 14px 0", alignItems:"center" }}>
+            <span style={{ fontSize:11, color:"#475569", textTransform:"uppercase", letterSpacing:".06em", marginRight:4 }}>🕐</span>
+            {[{ key:"all", label:"Todo" }, ...TIME_OPTIONS].map(o => {
+              const active = timeFilter === o.key;
+              return (
+                <button key={o.key}
+                  onClick={() => selectTimeFilter(o.key)}
+                  style={{
+                    background:  active ? "#3b82f622" : "#1a1f2e",
+                    border:      `1px solid ${active ? "#3b82f6" : "#1e2535"}`,
+                    borderRadius: 16,
+                    padding:     "3px 11px",
+                    color:       active ? "#60a5fa" : "#64748b",
+                    fontSize:    11,
+                    fontWeight:  active ? 700 : 500,
+                    cursor:      "pointer",
+                    transition:  "all .15s",
+                  }}>
+                  {o.label}
+                </button>
+              );
+            })}
+          </div>
+
           {/* ── Date filter ── */}
-          <div style={{ margin:"12px 0 0 0", display:"flex", alignItems:"center" }}>
-            <label htmlFor="filter-date" style={{ marginRight:8, fontSize:13, color:"#64748b" }}>Fecha mercado:</label>
+          <div style={{ margin:"0 0 8px 0", display:"flex", alignItems:"center", flexWrap:"wrap", gap:8 }}>
+            <label htmlFor="filter-date" style={{ fontSize:12, color:"#64748b" }}>📅 Fecha exacta:</label>
             <input id="filter-date" type="date" value={filterDate}
-              onChange={e => setFilterDate(e.target.value)}
-              style={{ fontSize:13, padding:"2px 8px" }} max={defaultDate} />
-            {filterDate && filterDate !== defaultDate && (
-              <button onClick={() => setFilterDate(defaultDate)} style={{ marginLeft:8, fontSize:13 }}>✕</button>
+              onChange={e => selectDate(e.target.value)}
+              style={{ fontSize:12, padding:"2px 8px", background:"#1a1f2e", border:"1px solid #1e2535", borderRadius:6, color:"#e2e8f0" }}
+              max={defaultDate} />
+            {filterDate && (
+              <button onClick={() => { setFilterDate(""); setTimeFilter("all"); }}
+                style={{ fontSize:12, background:"none", border:"none", color:"#64748b", cursor:"pointer" }}>✕</button>
             )}
           </div>
 
           {/* Active filter badges */}
-          {(filter !== "all" || (filterDate && filterDate !== defaultDate)) && (
-            <div style={{ margin:"10px 0", display:"flex", gap:10, flexWrap:"wrap" }}>
+          {(filter !== "all" || timeFilter !== "all" || (filterDate && filterDate !== defaultDate)) && (
+            <div style={{ margin:"6px 0 14px 0", display:"flex", gap:8, flexWrap:"wrap" }}>
               {filter !== "all" && (
-                <span style={{ background:"#1e2535", color:"#60a5fa", borderRadius:4, padding:"2px 8px", fontSize:12 }}>
+                <span style={{ background:"#1e2535", color:"#60a5fa", borderRadius:4, padding:"2px 8px", fontSize:11 }}>
                   Filtro: {filter}
                 </span>
               )}
-              {filterDate && filterDate !== defaultDate && (
-                <span style={{ background:"#1e2535", color:"#fbbf24", borderRadius:4, padding:"2px 8px", fontSize:12 }}>
-                  Fecha: {filterDate}
+              {timeFilter !== "all" && (
+                <span style={{ background:"#1e253599", color:"#38bdf8", borderRadius:4, padding:"2px 8px", fontSize:11, border:"1px solid #0ea5e944" }}>
+                  🕐 Últimas {TIME_OPTIONS.find(o=>o.key===timeFilter)?.label}
                 </span>
               )}
+              {filterDate && timeFilter === "all" && filterDate !== defaultDate && (
+                <span style={{ background:"#1e2535", color:"#fbbf24", borderRadius:4, padding:"2px 8px", fontSize:11 }}>
+                  📅 {filterDate}
+                </span>
+              )}
+              {filterDate && timeFilter === "all" && filterDate === defaultDate && (
+                <span style={{ background:"#1e2535", color:"#fbbf24", borderRadius:4, padding:"2px 8px", fontSize:11 }}>
+                  📅 Hoy
+                </span>
+              )}
+              <span style={{ color:"#334155", fontSize:11, alignSelf:"center" }}>
+                → {filtered.length} mercado{filtered.length!==1?"s":""}
+              </span>
             </div>
           )}
 

@@ -268,7 +268,9 @@ export default function App() {
               </div>
               {/* Lado derecho: toggle */}
               <span style={{ fontSize:10, color:"#334155", whiteSpace:"nowrap", marginLeft:8 }}>
-                {summaryOpen ? "▲ minimizar" : "▼ expandir"}
+                <span style={{ fontSize: 20, color: "#334155", lineHeight: 1, display: "flex", alignItems: "center" }}>
+                  {summaryOpen ? "▲" : "▼"}
+                </span>
               </span>
             </div>
 
@@ -313,8 +315,12 @@ export default function App() {
             <div className="token-section">
               <div className="section-title" style={{ display:"flex", alignItems:"center", justifyContent:"space-between", cursor:"pointer", userSelect:"none" }}
                 onClick={() => setTokensOpen(o => !o)}>
-                <span>P&amp;L por token</span>
-                <span style={{ fontSize:10, color:"#334155" }}>{tokensOpen ? "▲ minimizar" : "▼ expandir"}</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span>P&amp;L por token</span>
+                  <span style={{ fontSize: 20, color: "#334155", lineHeight: 1, display: "flex", alignItems: "center" }}>
+                    {tokensOpen ? "▲" : "▼"}
+                  </span>
+                </span>
               </div>
               {tokensOpen && (
                 <div className="token-grid">

@@ -102,7 +102,7 @@ export default function App() {
   const [filter,     setFilter]     = useState("all");
   const [expanded,   setExpanded]   = useState({});
   const [tokensOpen,   setTokensOpen]   = useState(false);
-  const [summaryOpen,  setSummaryOpen]  = useState(true);
+  const [summaryOpen,  setSummaryOpen]  = useState(false);
   const [timeFilter, setTimeFilter] = useState("all");
 
   const today = new Date();

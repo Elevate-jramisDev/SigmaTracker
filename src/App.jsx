@@ -395,7 +395,7 @@ export default function App() {
                                   border:"1px solid", borderColor:"#7c3aed44",
                                   letterSpacing:1, display:"flex", alignItems:"center", gap:5,
                                 }}>
-                                  <span style={{ color:"#64748b", fontWeight:400 }}>salida</span>
+                                  <span style={{ color:"#64748b", fontWeight:400 }}></span>
                                   <span style={{ fontWeight:800, fontSize:13 }}>{exitC}¢</span>
                                   {entryC !== null && exitC !== entryC && (
                                     <span style={{

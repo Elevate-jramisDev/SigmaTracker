@@ -363,18 +363,53 @@ export default function App() {
                     <div className="market-info">
                       <div className="market-title" style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
                         <span>{m.title}</span>
-                        {firstBuy?.outcome && (
-                          <span style={{
-                            fontSize:12, fontWeight:700, borderRadius:4, padding:"1px 8px",
-                            background: firstBuy.outcome.toLowerCase()==="up" ? "#14532d88":"#7f1d1d88",
-                            color:      firstBuy.outcome.toLowerCase()==="up" ? "#4ade80":"#f87171",
-                            border:"1px solid",
-                            borderColor:firstBuy.outcome.toLowerCase()==="up" ? "#22c55e66":"#ef444466",
-                            letterSpacing:1,
-                          }}>
-                            {firstBuy.outcome.toLowerCase()==="up" ? "↑ UP":"↓ DOWN"}
-                          </span>
-                        )}
+                        {firstBuy?.outcome && (() => {
+                          const isUp     = firstBuy.outcome.toLowerCase() === "up";
+                          const entryC   = m.avgEntryPrice > 0 ? Math.round(m.avgEntryPrice * 100) : null;
+                          const exitC    = m.avgExitPrice  > 0 ? Math.round(m.avgExitPrice  * 100) : null;
+                          const dirLabel = isUp ? "↑ UP" : "↓ DOWN";
+                          const bg       = isUp ? "#14532d88" : "#7f1d1d88";
+                          const col      = isUp ? "#4ade80"   : "#f87171";
+                          const border   = isUp ? "#22c55e66" : "#ef444466";
+                          return (
+                            <>
+                              {/* Badge dirección + precio entrada */}
+                              <span style={{
+                                fontSize:12, fontWeight:700, borderRadius:4, padding:"1px 8px",
+                                background: bg, color: col,
+                                border:"1px solid", borderColor: border,
+                                letterSpacing:1, display:"flex", alignItems:"center", gap:5,
+                              }}>
+                                {dirLabel}
+                                {entryC !== null && (
+                                  <span style={{ fontWeight:800, fontSize:13 }}>
+                                    {entryC}¢
+                                  </span>
+                                )}
+                              </span>
+                              {/* Badge salida si existe */}
+                              {exitC !== null && (
+                                <span style={{
+                                  fontSize:12, fontWeight:700, borderRadius:4, padding:"1px 8px",
+                                  background:"#1e2535", color:"#a78bfa",
+                                  border:"1px solid", borderColor:"#7c3aed44",
+                                  letterSpacing:1, display:"flex", alignItems:"center", gap:5,
+                                }}>
+                                  <span style={{ color:"#64748b", fontWeight:400 }}>salida</span>
+                                  <span style={{ fontWeight:800, fontSize:13 }}>{exitC}¢</span>
+                                  {entryC !== null && exitC !== entryC && (
+                                    <span style={{
+                                      color: exitC > entryC ? "#4ade80" : "#f87171",
+                                      fontSize:11,
+                                    }}>
+                                      {exitC > entryC ? `+${exitC - entryC}` : `${exitC - entryC}`}¢
+                                    </span>
+                                  )}
+                                </span>
+                              )}
+                            </>
+                          );
+                        })()}
                       </div>
                       <div style={{ display:"flex", gap:8, marginTop:4, flexWrap:"wrap", alignItems:"center" }}>
                         <span style={{ fontSize:11, color:"#64748b" }}>{fmtDate(m.lastTs)}</span>

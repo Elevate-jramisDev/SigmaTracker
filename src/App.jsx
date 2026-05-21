@@ -101,7 +101,8 @@ export default function App() {
   const [error,    setError]    = useState(null);
   const [filter,     setFilter]     = useState("all");
   const [expanded,   setExpanded]   = useState({});
-  const [tokensOpen, setTokensOpen] = useState(false);
+  const [tokensOpen,   setTokensOpen]   = useState(false);
+  const [summaryOpen,  setSummaryOpen]  = useState(true);
   const [timeFilter, setTimeFilter] = useState("all");
 
   const today = new Date();
@@ -232,29 +233,72 @@ export default function App() {
         <main className="main">
 
           {/* ── Summary cards ── */}
-          <div className="cards">
-            {[
-              { label:"P&L Neto",        val: fmt(totalPnl)+" $",                             col: totalPnl >= 0 ? "#4ade80":"#f87171" },
-              { label:"P&L Bruto",       val: fmt(totalGrossPnl)+" $",                        col: totalGrossPnl >= 0 ? "#4ade80":"#f87171" },
-              /*{ label:"Fees totales",    val: "-"+totalFees.toFixed(3)+" $",                  col: "#fb923c" },*/
-              { label:"Retorno",         val: fmtPct(totalPct),                               col: totalPct >= 0 ? "#4ade80":"#f87171" },
-              { label:"Mercados",        val: markets.length,                                 col: "#94a3b8" },
-              { label:"Ganadoras",       val: `${winners}`,                                   col: "#4ade80" },
-              { label:"Perdedoras",      val: `${losers}`,                                    col: "#f87171" },
-              { label:"Winrate",         val: `${winrate.toFixed(1)}%`,                       col: winrate >= 50 ? "#4ade80":"#f87171" },
-              { label:"Profit Factor",   val: isFinite(profitFactor) ? profitFactor.toFixed(2) : "∞", col: profitFactor >= 1 ? "#4ade80":"#f87171" },
-              { label:"Avg Win / Loss",  val: `${avgWin.toFixed(2)}$ / ${avgLoss.toFixed(2)}$`, col: avgWin >= avgLoss ? "#4ade80":"#fbbf24" },
-              { label:"Mayor ganancia",  val: fmt(maxWin)+" $",                               col: "#4ade80" },
-              { label:"Mayor pérdida",   val: fmt(maxLoss)+" $",                              col: "#f87171" },
-              { label:"Racha actual",    val: streakLabel,                                    col: streakType==="win" ? "#4ade80" : streakType==="loss" ? "#f87171":"#94a3b8" },
-              { label:"Invertido",       val: totalCost.toFixed(1)+" $",                      col: "#94a3b8" },
-              { label:"Balance wallet",  val: walletBalance.toFixed(2)+" $",                  col: "#fbbf24" },
-            ].map(c => (
-              <div key={c.label} className="card">
-                <span className="card-label">{c.label}</span>
-                <span className="card-val" style={{ color:c.col }}>{c.val}</span>
+          <div style={{ marginBottom: 20 }}>
+            {/* Cabecera colapsable */}
+            <div
+              onClick={() => setSummaryOpen(o => !o)}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                cursor: "pointer", userSelect: "none",
+                padding: "7px 12px",
+                background: "#1a1f2e",
+                border: "1px solid #1e2535",
+                borderRadius: summaryOpen ? "10px 10px 0 0" : 10,
+                transition: "border-radius .15s",
+              }}>
+              {/* Lado izquierdo: P&L neto destacado */}
+              <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+                <span style={{ fontSize:12, color:"#475569", fontWeight:600, textTransform:"uppercase", letterSpacing:".07em" }}>
+                  Rendimiento
+                </span>
+                <span style={{ fontSize:15, fontWeight:800, color: totalPnl >= 0 ? "#4ade80" : "#f87171" }}>
+                  {fmt(totalPnl)} $
+                </span>
+                <span style={{ fontSize:11, color: totalPct >= 0 ? "#4ade80" : "#f87171" }}>
+                  ({fmtPct(totalPct)})
+                </span>
+                <span style={{ fontSize:11, color:"#334155" }}>·</span>
+                <span style={{ fontSize:11, color: winrate >= 50 ? "#4ade80" : "#f87171" }}>
+                  WR {winrate.toFixed(0)}%
+                </span>
+                <span style={{ fontSize:11, color:"#334155" }}>·</span>
+                <span style={{ fontSize:11, color: streakType==="win" ? "#4ade80" : streakType==="loss" ? "#f87171" : "#94a3b8" }}>
+                  {streakLabel}
+                </span>
               </div>
-            ))}
+              {/* Lado derecho: toggle */}
+              <span style={{ fontSize:10, color:"#334155", whiteSpace:"nowrap", marginLeft:8 }}>
+                {summaryOpen ? "▲ minimizar" : "▼ expandir"}
+              </span>
+            </div>
+
+            {/* Cards expandibles */}
+            {summaryOpen && (
+              <div className="cards" style={{ borderRadius:"0 0 10px 10px", border:"1px solid #1e2535", borderTop:"none", padding:12, marginBottom:0 }}>
+                {[
+                  { label:"P&L Neto",        val: fmt(totalPnl)+" $",                               col: totalPnl >= 0 ? "#4ade80":"#f87171" },
+                  { label:"P&L Bruto",       val: fmt(totalGrossPnl)+" $",                          col: totalGrossPnl >= 0 ? "#4ade80":"#f87171" },
+                  { label:"Fees totales",    val: "-"+totalFees.toFixed(3)+" $",                    col: "#fb923c" },
+                  { label:"Retorno",         val: fmtPct(totalPct),                                 col: totalPct >= 0 ? "#4ade80":"#f87171" },
+                  { label:"Mercados",        val: markets.length,                                   col: "#94a3b8" },
+                  { label:"Ganadoras",       val: `${winners}`,                                     col: "#4ade80" },
+                  { label:"Perdedoras",      val: `${losers}`,                                      col: "#f87171" },
+                  { label:"Winrate",         val: `${winrate.toFixed(1)}%`,                         col: winrate >= 50 ? "#4ade80":"#f87171" },
+                  { label:"Profit Factor",   val: isFinite(profitFactor) ? profitFactor.toFixed(2) : "∞", col: profitFactor >= 1 ? "#4ade80":"#f87171" },
+                  { label:"Avg Win / Loss",  val: `${avgWin.toFixed(2)}$ / ${avgLoss.toFixed(2)}$`, col: avgWin >= avgLoss ? "#4ade80":"#fbbf24" },
+                  { label:"Mayor ganancia",  val: fmt(maxWin)+" $",                                 col: "#4ade80" },
+                  { label:"Mayor pérdida",   val: fmt(maxLoss)+" $",                                col: "#f87171" },
+                  { label:"Racha actual",    val: streakLabel,                                      col: streakType==="win" ? "#4ade80" : streakType==="loss" ? "#f87171":"#94a3b8" },
+                  { label:"Invertido",       val: totalCost.toFixed(1)+" $",                        col: "#94a3b8" },
+                  { label:"Balance wallet",  val: walletBalance.toFixed(2)+" $",                    col: "#fbbf24" },
+                ].map(c => (
+                  <div key={c.label} className="card">
+                    <span className="card-label">{c.label}</span>
+                    <span className="card-val" style={{ color:c.col }}>{c.val}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* ── Fee alert global ── */}

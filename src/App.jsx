@@ -581,7 +581,7 @@ export default function App() {
                 {[
                   { label:"P&L Neto",        val: fmt(totalPnl)+" $",                               col: totalPnl >= 0 ? "#4ade80":"#f87171" },
                   { label:"P&L Bruto",       val: fmt(totalGrossPnl)+" $",                          col: totalGrossPnl >= 0 ? "#4ade80":"#f87171" },
-                  { label:"Fees totales",    val: "-"+totalFees.toFixed(3)+" $",                    col: "#fb923c" },
+                  /*{ label:"Fees totales",    val: "-"+totalFees.toFixed(3)+" $",                    col: "#fb923c" },*/
                   { label:"Retorno",         val: fmtPct(totalPct),                                 col: totalPct >= 0 ? "#4ade80":"#f87171" },
                   { label:"Mercados",        val: markets.length,                                   col: "#94a3b8" },
                   { label:"Ganadoras",       val: `${winners}`,                                     col: "#4ade80" },

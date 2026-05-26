@@ -95,46 +95,15 @@ const fmtDuration = secs => {
   return `${Math.floor(secs / 86400)}d ${Math.floor((secs % 86400) / 3600)}h`;
 };
 
-const MANUAL_TRADES_KEY = "sigmatracker_manual_trades";
-
-function loadManualFromStorage(wallet) {
+async function fetchManualFromRepo() {
   try {
-    const key = wallet ? `${MANUAL_TRADES_KEY}:${wallet.toLowerCase()}` : MANUAL_TRADES_KEY;
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : [];
+    const res = await fetch("/manual-trades.json");
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
   } catch { return []; }
 }
 
-function saveManualToStorage(wallet, trades) {
-  try {
-    const key = wallet ? `${MANUAL_TRADES_KEY}:${wallet.toLowerCase()}` : MANUAL_TRADES_KEY;
-    localStorage.setItem(key, JSON.stringify(trades));
-  } catch { /* ignore */ }
-}
-
-async function fetchManualFromServer(wallet) {
-  try {
-    const res = await fetch(`/api/manual-trades?wallet=${encodeURIComponent(wallet)}`);
-    if (!res.ok) return null; // servidor no disponible o no configurado
-    return await res.json();
-  } catch { return null; }
-}
-
-async function saveManualToServer(wallet, trades) {
-  try {
-    await fetch("/api/manual-trades", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ wallet, trades }),
-    });
-  } catch { /* offline fallback */ }
-}
-
-async function deleteManualFromServer(wallet) {
-  try {
-    await fetch(`/api/manual-trades?wallet=${encodeURIComponent(wallet)}`, { method: "DELETE" });
-  } catch { /* offline fallback */ }
-}
 
 export default function App() {
   const [inputWallet, setInputWallet] = useState(DEFAULT_WALLET);
@@ -148,14 +117,8 @@ export default function App() {
   const [summaryOpen,  setSummaryOpen]  = useState(false);
   const [timeFilter, setTimeFilter] = useState("all");
 
-  // ── Trades manuales ──
-  const [manualTrades,      setManualTrades]      = useState([]);
-  const [manualOpen,        setManualOpen]        = useState(false);
-  const [manualJson,        setManualJson]        = useState("");
-  const [manualError,       setManualError]       = useState(null);
-  const [manualSuccess,     setManualSuccess]     = useState(false);
-  const [pickedConditionId, setPickedConditionId] = useState("");
-  const [marketSearch,      setMarketSearch]      = useState("");
+  // ── Trades manuales (cargados desde /manual-trades.json) ──
+  const [manualTrades, setManualTrades] = useState([]);
 
   const today = new Date();
   const defaultDate = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
@@ -182,72 +145,7 @@ export default function App() {
 
   const toggleExpand = id => setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
 
-  // Persistir trades manuales: servidor (Upstash) + localStorage como fallback
-  useEffect(() => {
-    if (!loadedWallet) return;
-    saveManualToStorage(loadedWallet, manualTrades);
-    saveManualToServer(loadedWallet, manualTrades);
-  }, [manualTrades, loadedWallet]);
-
-  // ── Helpers trades manuales ──
-  function saveManualTrades(list) {
-    setManualTrades(list);
-  }
-
-  function applyManualJson() {
-    setManualError(null);
-    setManualSuccess(false);
-    try {
-      const parsed = JSON.parse(manualJson);
-      if (!Array.isArray(parsed)) throw new Error("El JSON debe ser un array de trades.");
-      const required = ["side", "price", "size", "timestamp"];
-      for (const [i, t] of parsed.entries()) {
-        for (const field of required) {
-          if (t[field] === undefined) throw new Error(`Trade #${i+1}: falta el campo "${field}".`);
-        }
-        if (!pickedConditionId && !t.conditionId)
-          throw new Error(`Trade #${i+1}: falta "conditionId" (o selecciona un mercado arriba).`);
-        if (!["BUY","SELL"].includes(t.side)) throw new Error(`Trade #${i+1}: "side" debe ser "BUY" o "SELL".`);
-      }
-      // Si hay mercado seleccionado en el picker, usarlo como conditionId para todos los trades
-      const targetId = pickedConditionId || null;
-      const pickedMeta = targetId ? apiMarkets.find(m => m.conditionId === targetId) : null;
-      const tagged = parsed.map(t => ({
-        ...t,
-        conditionId: targetId || (t.conditionId || "").toLowerCase(),
-        title: t.title || pickedMeta?.title || t.conditionId,
-        icon:  t.icon  || pickedMeta?.icon  || null,
-        _manual: true,
-      }));
-      saveManualTrades([...manualTrades, ...tagged]);
-      setManualJson("");
-      setPickedConditionId("");
-      setMarketSearch("");
-      setManualSuccess(true);
-      setTimeout(() => setManualSuccess(false), 3000);
-    } catch (e) {
-      setManualError(e.message);
-    }
-  }
-
-  function clearManualTrades() {
-    saveManualTrades([]);
-    setManualJson("");
-    setManualError(null);
-    if (loadedWallet) deleteManualFromServer(loadedWallet);
-  }
-
-  // Mercados únicos de la API (para el selector)
-  const apiMarkets = useMemo(() => {
-    const seen = {};
-    for (const t of trades) {
-      const id = (t.conditionId || "").toLowerCase();
-      if (!seen[id]) seen[id] = { conditionId: id, title: t.title || id.slice(0, 20) + "…", icon: t.icon };
-    }
-    return Object.values(seen);
-  }, [trades]);
-
-  // Trades fusionados (API + manuales)
+  // Trades fusionados (API + manuales del repositorio)
   const allTrades = useMemo(() => [...trades, ...manualTrades], [trades, manualTrades]);
 
   async function load(addr) {
@@ -259,16 +157,9 @@ export default function App() {
       setTrades(await res.json());
       setLoadedWallet(addr);
 
-      // Cargar trades manuales: intentar servidor primero, si no hay → localStorage
-      const serverTrades = await fetchManualFromServer(addr);
-      if (serverTrades && Array.isArray(serverTrades)) {
-        setManualTrades(serverTrades);
-        // Sincronizar localStorage también
-        saveManualToStorage(addr, serverTrades);
-      } else {
-        // Fallback a localStorage (offline / Redis no configurado)
-        setManualTrades(loadManualFromStorage(addr));
-      }
+      // Cargar trades manuales desde el JSON del repositorio
+      const repoTrades = await fetchManualFromRepo();
+      setManualTrades(repoTrades.map(t => ({ ...t, _manual: true })));
     } catch (e) {
       setError(e.message);
     } finally {
@@ -356,16 +247,14 @@ export default function App() {
             onKeyDown={e => e.key === "Enter" && load(inputWallet)} />
           <button className="btn-load" onClick={() => load(inputWallet)}>Cargar</button>
           <button
-            onClick={() => setManualOpen(o => !o)}
-            title="Añadir trades manualmente"
+            title={manualTrades.length > 0 ? `${manualTrades.length} trades manuales cargados desde el repositorio` : "No hay trades manuales en el repositorio"}
             style={{
               background: manualTrades.length > 0 ? "#7c3aed33" : "#1a1f2e",
               border: `1px solid ${manualTrades.length > 0 ? "#7c3aed" : "#1e2535"}`,
               borderRadius: 8, padding: "6px 13px",
               color: manualTrades.length > 0 ? "#a78bfa" : "#64748b",
-              fontSize: 12, fontWeight: 600, cursor: "pointer",
+              fontSize: 12, fontWeight: 600, cursor: "default",
               display: "flex", alignItems: "center", gap: 6,
-              transition: "all .15s",
             }}>
             ✏ Manuales
             {manualTrades.length > 0 && (
@@ -376,203 +265,6 @@ export default function App() {
             )}
           </button>
         </div>
-
-        {/* ── Panel trades manuales ── */}
-        {manualOpen && (
-          <div style={{
-            background: "#1a1f2e", border: "1px solid #7c3aed44",
-            borderRadius: 10, padding: "14px 16px", marginTop: 10,
-          }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: "#a78bfa" }}>✏ Trades manuales</span>
-              {manualTrades.length > 0 && (
-                <button onClick={clearManualTrades} style={{
-                  background: "none", border: "1px solid #f8717166",
-                  borderRadius: 6, padding: "3px 10px",
-                  color: "#f87171", fontSize: 11, cursor: "pointer",
-                }}>🗑 Limpiar todos</button>
-              )}
-            </div>
-
-            {/* ── Lista de trades manuales guardados ── */}
-            {manualTrades.length > 0 && (
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 10, color: "#475569", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6 }}>
-                  Trades guardados ({manualTrades.length})
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  {manualTrades.map((t, i) => {
-                    const tid = (t.conditionId || "").toLowerCase();
-                    const matched = trades.some(a => (a.conditionId || "").toLowerCase() === tid);
-                    return (
-                      <div key={i} style={{
-                        display: "flex", alignItems: "center", gap: 8,
-                        background: "#0d0f14", border: `1px solid ${matched ? "#22c55e33" : "#f8717133"}`,
-                        borderRadius: 6, padding: "6px 10px", fontSize: 11,
-                      }}>
-                        <span style={{ color: t.side === "BUY" ? "#4ade80" : "#f87171", fontWeight: 700, minWidth: 32 }}>
-                          {t.side}
-                        </span>
-                        <span style={{ color: "#94a3b8", minWidth: 48, fontVariantNumeric: "tabular-nums" }}>
-                          {t.price?.toFixed(4)} $
-                        </span>
-                        <span style={{ color: "#64748b", minWidth: 48 }}>×{t.size}</span>
-                        <span style={{ color: "#475569", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {t.title || (t.conditionId?.slice(0, 12) + "…")}
-                        </span>
-                        <span title={t.conditionId} style={{
-                          fontSize: 10, fontWeight: 700, borderRadius: 4, padding: "1px 5px",
-                          background: matched ? "#14532d44" : "#7f1d1d44",
-                          color: matched ? "#4ade80" : "#f87171",
-                          border: `1px solid ${matched ? "#22c55e44" : "#ef444444"}`,
-                          whiteSpace: "nowrap", flexShrink: 0,
-                        }}>
-                          {matched ? "✓ mergeado" : "✗ sin match"}
-                        </span>
-                        <button
-                          onClick={() => saveManualTrades(manualTrades.filter((_, j) => j !== i))}
-                          title="Eliminar este trade"
-                          style={{
-                            background: "none", border: "1px solid #f8717144",
-                            borderRadius: 4, padding: "1px 6px",
-                            color: "#f87171", fontSize: 11, cursor: "pointer",
-                            flexShrink: 0,
-                          }}>✕</button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* ── Selector de mercado ── */}
-            {trades.length > 0 && (
-              <div style={{ marginBottom: 10 }}>
-                <div style={{ fontSize: 10, color: "#475569", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 5 }}>
-                  Adjuntar a mercado existente <span style={{ color: "#7c3aed", fontStyle: "normal" }}>(recomendado)</span>
-                </div>
-                {pickedConditionId ? (
-                  <div style={{
-                    display: "flex", alignItems: "center", gap: 8,
-                    background: "#14532d33", border: "1px solid #22c55e44",
-                    borderRadius: 6, padding: "6px 10px",
-                  }}>
-                    <span style={{ fontSize: 11, color: "#4ade80", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      ✓ {apiMarkets.find(m => m.conditionId === pickedConditionId)?.title || pickedConditionId}
-                    </span>
-                    <button onClick={() => { setPickedConditionId(""); setMarketSearch(""); }} style={{
-                      background: "none", border: "none", color: "#64748b", fontSize: 12, cursor: "pointer",
-                    }}>✕</button>
-                  </div>
-                ) : (
-                  <div>
-                    <input
-                      value={marketSearch}
-                      onChange={e => setMarketSearch(e.target.value)}
-                      placeholder="Buscar mercado por nombre…"
-                      style={{
-                        width: "100%", boxSizing: "border-box",
-                        background: "#0d0f14", border: "1px solid #1e2535",
-                        borderRadius: 6, padding: "5px 9px",
-                        color: "#e2e8f0", fontSize: 11, outline: "none",
-                        marginBottom: 4,
-                      }}
-                    />
-                    {marketSearch.trim().length > 0 && (
-                      <div style={{
-                        background: "#0d0f14", border: "1px solid #1e2535",
-                        borderRadius: 6, maxHeight: 160, overflowY: "auto",
-                      }}>
-                        {apiMarkets
-                          .filter(m => m.title.toLowerCase().includes(marketSearch.toLowerCase()))
-                          .slice(0, 12)
-                          .map(m => (
-                            <div key={m.conditionId}
-                              onClick={() => { setPickedConditionId(m.conditionId); setMarketSearch(""); }}
-                              style={{
-                                display: "flex", alignItems: "center", gap: 8,
-                                padding: "6px 10px", fontSize: 11, cursor: "pointer",
-                                borderBottom: "1px solid #1e253540",
-                              }}
-                              onMouseEnter={e => e.currentTarget.style.background = "#1a1f2e"}
-                              onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                            >
-                              {m.icon && <img src={m.icon} style={{ width: 16, height: 16, borderRadius: 3, objectFit: "contain" }} alt="" />}
-                              <span style={{ color: "#94a3b8", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.title}</span>
-                              <span style={{ color: "#334155", fontSize: 10, fontFamily: "monospace" }}>{m.conditionId.slice(0, 8)}…</span>
-                            </div>
-                          ))}
-                        {apiMarkets.filter(m => m.title.toLowerCase().includes(marketSearch.toLowerCase())).length === 0 && (
-                          <div style={{ padding: "8px 10px", fontSize: 11, color: "#475569" }}>Sin resultados</div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ── Añadir nuevos ── */}
-            <div style={{ fontSize: 11, color: "#64748b", marginBottom: 8 }}>
-              Pega un array JSON con los trades a añadir. Se fusionarán con los de la API.
-              Campos obligatorios: <code style={{ color: "#a78bfa" }}>conditionId</code>, <code style={{ color: "#a78bfa" }}>side</code> (BUY/SELL),{" "}
-              <code style={{ color: "#a78bfa" }}>price</code>, <code style={{ color: "#a78bfa" }}>size</code>, <code style={{ color: "#a78bfa" }}>timestamp</code>.
-              Opcionales: <code style={{ color: "#94a3b8" }}>title</code>, <code style={{ color: "#94a3b8" }}>outcome</code>, <code style={{ color: "#94a3b8" }}>feeRateBps</code>, <code style={{ color: "#94a3b8" }}>icon</code>.
-            </div>
-            <details style={{ marginBottom: 8 }}>
-              <summary style={{ fontSize: 11, color: "#475569", cursor: "pointer", userSelect: "none" }}>Ver ejemplo JSON</summary>
-              <pre style={{
-                background: "#0d0f14", border: "1px solid #1e2535", borderRadius: 6,
-                padding: "8px 10px", fontSize: 10, color: "#94a3b8",
-                overflowX: "auto", marginTop: 6,
-              }}>{`[
-  {
-    "conditionId": "0xabc123...",
-    "title": "Will BTC exceed $100k?",
-    "outcome": "Up",
-    "side": "BUY",
-    "price": 0.45,
-    "size": 20,
-    "timestamp": 1748000000,
-    "feeRateBps": 20
-  }
-]`}</pre>
-            </details>
-            <textarea
-              value={manualJson}
-              onChange={e => { setManualJson(e.target.value); setManualError(null); setManualSuccess(false); }}
-              placeholder='[{ "conditionId": "...", "side": "BUY", "price": 0.5, "size": 10, "timestamp": 1748000000 }]'
-              rows={4}
-              style={{
-                width: "100%", boxSizing: "border-box",
-                background: "#0d0f14", border: `1px solid ${manualError ? "#f87171" : "#1e2535"}`,
-                borderRadius: 6, padding: "8px 10px",
-                color: "#e2e8f0", fontSize: 11, fontFamily: "monospace",
-                resize: "vertical", outline: "none",
-              }}
-            />
-            {manualError && (
-              <div style={{ color: "#f87171", fontSize: 11, marginTop: 4 }}>⚠ {manualError}</div>
-            )}
-            {manualSuccess && (
-              <div style={{ color: "#4ade80", fontSize: 11, marginTop: 4 }}>✓ Trades añadidos correctamente</div>
-            )}
-            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-              <button
-                onClick={applyManualJson}
-                disabled={!manualJson.trim()}
-                style={{
-                  background: manualJson.trim() ? "#7c3aed" : "#1e2535",
-                  border: "1px solid #7c3aed66",
-                  borderRadius: 6, padding: "5px 14px",
-                  color: manualJson.trim() ? "#fff" : "#475569",
-                  fontSize: 12, fontWeight: 600, cursor: manualJson.trim() ? "pointer" : "default",
-                }}>
-                ➕ Añadir trades
-              </button>
-            </div>
-          </div>
-        )}
       </header>
 
       {loading && <div className="state">⟳ Cargando trades…</div>}

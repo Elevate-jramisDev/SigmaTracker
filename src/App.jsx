@@ -97,15 +97,48 @@ const fmtDuration = secs => {
 
 const MANUAL_TRADES_KEY = "sigmatracker_manual_trades";
 
-function loadManualFromStorage() {
+function loadManualFromStorage(wallet) {
   try {
-    const raw = localStorage.getItem(MANUAL_TRADES_KEY);
+    const key = wallet ? `${MANUAL_TRADES_KEY}:${wallet.toLowerCase()}` : MANUAL_TRADES_KEY;
+    const raw = localStorage.getItem(key);
     return raw ? JSON.parse(raw) : [];
   } catch { return []; }
 }
 
+function saveManualToStorage(wallet, trades) {
+  try {
+    const key = wallet ? `${MANUAL_TRADES_KEY}:${wallet.toLowerCase()}` : MANUAL_TRADES_KEY;
+    localStorage.setItem(key, JSON.stringify(trades));
+  } catch { /* ignore */ }
+}
+
+async function fetchManualFromServer(wallet) {
+  try {
+    const res = await fetch(`/api/manual-trades?wallet=${encodeURIComponent(wallet)}`);
+    if (!res.ok) return null; // servidor no disponible o no configurado
+    return await res.json();
+  } catch { return null; }
+}
+
+async function saveManualToServer(wallet, trades) {
+  try {
+    await fetch("/api/manual-trades", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ wallet, trades }),
+    });
+  } catch { /* offline fallback */ }
+}
+
+async function deleteManualFromServer(wallet) {
+  try {
+    await fetch(`/api/manual-trades?wallet=${encodeURIComponent(wallet)}`, { method: "DELETE" });
+  } catch { /* offline fallback */ }
+}
+
 export default function App() {
   const [inputWallet, setInputWallet] = useState(DEFAULT_WALLET);
+  const [loadedWallet, setLoadedWallet] = useState("");
   const [trades,   setTrades]   = useState([]);
   const [loading,  setLoading]  = useState(false);
   const [error,    setError]    = useState(null);
@@ -116,7 +149,7 @@ export default function App() {
   const [timeFilter, setTimeFilter] = useState("all");
 
   // ── Trades manuales ──
-  const [manualTrades,      setManualTrades]      = useState(loadManualFromStorage);
+  const [manualTrades,      setManualTrades]      = useState([]);
   const [manualOpen,        setManualOpen]        = useState(false);
   const [manualJson,        setManualJson]        = useState("");
   const [manualError,       setManualError]       = useState(null);
@@ -149,10 +182,12 @@ export default function App() {
 
   const toggleExpand = id => setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
 
-  // Persistir trades manuales en localStorage cuando cambian
+  // Persistir trades manuales: servidor (Upstash) + localStorage como fallback
   useEffect(() => {
-    localStorage.setItem(MANUAL_TRADES_KEY, JSON.stringify(manualTrades));
-  }, [manualTrades]);
+    if (!loadedWallet) return;
+    saveManualToStorage(loadedWallet, manualTrades);
+    saveManualToServer(loadedWallet, manualTrades);
+  }, [manualTrades, loadedWallet]);
 
   // ── Helpers trades manuales ──
   function saveManualTrades(list) {
@@ -199,6 +234,7 @@ export default function App() {
     saveManualTrades([]);
     setManualJson("");
     setManualError(null);
+    if (loadedWallet) deleteManualFromServer(loadedWallet);
   }
 
   // Mercados únicos de la API (para el selector)
@@ -221,6 +257,18 @@ export default function App() {
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setTrades(await res.json());
+      setLoadedWallet(addr);
+
+      // Cargar trades manuales: intentar servidor primero, si no hay → localStorage
+      const serverTrades = await fetchManualFromServer(addr);
+      if (serverTrades && Array.isArray(serverTrades)) {
+        setManualTrades(serverTrades);
+        // Sincronizar localStorage también
+        saveManualToStorage(addr, serverTrades);
+      } else {
+        // Fallback a localStorage (offline / Redis no configurado)
+        setManualTrades(loadManualFromStorage(addr));
+      }
     } catch (e) {
       setError(e.message);
     } finally {

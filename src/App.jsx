@@ -145,6 +145,15 @@ export default function App() {
 
   const toggleExpand = id => setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
 
+  const [copiedId, setCopiedId] = useState(null);
+  function copyTitle(e, conditionId, title) {
+    e.stopPropagation();
+    navigator.clipboard.writeText(title).then(() => {
+      setCopiedId(conditionId);
+      setTimeout(() => setCopiedId(id => id === conditionId ? null : id), 1500);
+    });
+  }
+
   // Trades fusionados (API + manuales del repositorio)
   const allTrades = useMemo(() => [...trades, ...manualTrades], [trades, manualTrades]);
 
@@ -521,6 +530,18 @@ export default function App() {
                     <div className="market-info">
                       <div className="market-title" style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
                         <span>{m.title}</span>
+                        <button
+                          title="Copiar título"
+                          onClick={e => copyTitle(e, m.conditionId, m.title)}
+                          style={{
+                            background: "none", border: "none", cursor: "pointer",
+                            padding: "2px 5px", borderRadius: 4,
+                            color: copiedId === m.conditionId ? "#4ade80" : "#475569",
+                            fontSize: 16, lineHeight: 1, flexShrink: 0,
+                            transition: "color .2s",
+                          }}>
+                          {copiedId === m.conditionId ? "✓" : "⧉"}
+                        </button>
                         {hasManual && (
                           <span style={{
                             fontSize: 10, fontWeight: 700, borderRadius: 4, padding: "1px 6px",

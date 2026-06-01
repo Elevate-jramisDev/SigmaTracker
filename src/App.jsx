@@ -29,6 +29,7 @@ function groupByMarket(trades) {
     if (!map[id]) map[id] = {
       ...t,
       conditionId: id,
+      slug: t.slug, // <-- Asegurar que el slug se propaga
       buyCost: 0, sellRevenue: 0,
       totalFees: 0,
       totalBuySize: 0, totalSellSize: 0,
@@ -312,7 +313,7 @@ export default function App() {
                   WR {winrate.toFixed(0)}%
                 </span>
                 <span style={{ fontSize:11, color:"#334155" }}>·</span>
-                <span style={{ fontSize:11, color: streakType==="win" ? "#4ade80" : streakType==="loss" ? "#f87171" : "#94a3b8" }}>
+                <span style={{ fontSize:11, color:"#334155" }}>
                   {streakLabel}
                 </span>
               </div>
@@ -542,6 +543,26 @@ export default function App() {
                           }}>
                           {copiedId === m.conditionId ? "✓" : "⧉"}
                         </button>
+                        {m.slug && (
+                          <a
+                            href={`https://polymarket.com/es/event/${m.slug}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Abrir mercado en Polymarket"
+                            onClick={e => e.stopPropagation()}
+                            style={{
+                              color: "#475569",
+                              fontSize: 16,
+                              lineHeight: 1,
+                              display: "inline-flex",
+                              alignItems: "center",
+                              padding: "2px 5px",
+                            }}
+                            className="market-link-icon"
+                          >
+                            ↗
+                          </a>
+                        )}
                         {hasManual && (
                           <span style={{
                             fontSize: 10, fontWeight: 700, borderRadius: 4, padding: "1px 6px",

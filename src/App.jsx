@@ -132,6 +132,7 @@ export default function App() {
     { key: "12h", label: "12h",  secs: 12 * 3600 },
     { key: "24h", label: "24h",  secs: 24 * 3600 },
     { key: "7d",  label: "7d",   secs: 7 * 86400 },
+    { key: "14d", label: "14d",  secs: 14 * 86400 },
     { key: "30d", label: "30d",  secs: 30 * 86400 },
   ];
 

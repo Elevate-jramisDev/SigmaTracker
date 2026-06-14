@@ -60,5 +60,26 @@
     "profileImage":"",
     "profileImageOptimized":"",
     "transactionHash":"0x4481e3290d5f606e6ff0425c7bba6998122d1ab0b32f09ea8eedfe726af88c3b"
+  },
+  {
+    "proxyWallet": "0xe1c70472413b93fd6ffedf45869c7aa0a909acd5",
+    "side": "SELL",
+    "asset": "2626087618589130499224398506298423341558927984791140435146164186047156525478",
+    "conditionId": "0x98e26f2867feef38a9d0cd50c5b14276c25f7542d65abce29caab9d61befcfcc",
+    "size": 37.44,
+    "price": 1,
+    "timestamp": 1781439274,
+    "title": "Bitcoin Up or Down - June 14, 8:10AM-8:15AM ET",
+    "slug": "btc-updown-5m-1781439000",
+    "icon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/BTC+fullsize.png",
+    "eventSlug": "btc-updown-5m-1781439000",
+    "outcome": "Down",
+    "outcomeIndex": 1,
+    "name": "",
+    "pseudonym": "",
+    "bio": "",
+    "profileImage": "",
+    "profileImageOptimized": "",
+    "transactionHash": "0xc7494b17fc017f0eeafdf7feff8148069e3f651332b2fda4365e21a0a6ab6e24"
   }
 ]

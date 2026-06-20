@@ -1,163 +1,119 @@
 # SigmaTracker
 
-SigmaTracker es una aplicación web para el seguimiento y análisis avanzado de operaciones (trades) en **Polymarket**. Proporciona métricas profesionales de trading: P&L desglosado en bruto/fees/neto, estadísticas por token, winrate, racha, profit factor y análisis detallado por mercado.
+SigmaTracker es una aplicación web para seguir y analizar operaciones de una wallet en Polymarket. Combina trades de la Data API con trades manuales definidos en el repositorio y calcula métricas de rendimiento por mercado, token y ventana temporal.
 
-## Características principales
+## Características
 
-### 📊 Dashboard de resumen global
-| Métrica | Descripción |
-|---|---|
-| **P&L Neto** | Ganancias/pérdidas después de fees |
-| **P&L Bruto** | Ganancias/pérdidas antes de fees |
-| **Fees totales** | Total de comisiones pagadas |
-| **Retorno %** | Rentabilidad sobre capital invertido |
-| **Winrate** | % de mercados cerrados en positivo |
-| **Profit Factor** | Ratio ganancias brutas / pérdidas brutas |
-| **Avg Win / Loss** | Media de ganancia por win vs pérdida por loss |
-| **Mayor ganancia** | Mejor operación individual |
-| **Mayor pérdida** | Peor operación individual |
-| **Racha actual** | 🔥 streak ganador / ❄️ streak perdedor |
-| **Balance wallet** | Flujo neto de capital (entradas - salidas) |
-| **Invertido** | Capital total desplegado |
+- Dashboard de P&L bruto, fees, P&L neto, retorno, winrate, profit factor, racha, inversión y balance.
+- Agrupación de trades por mercado con detalle expandible y log individual de operaciones.
+- Resumen colapsable de P&L por token detectado en el título del mercado.
+- Filtros por resultado, token, fecha exacta y ventanas relativas de 1h a 30d.
+- Carga de trades manuales desde `public/manual-trades.json`, filtrados por `proxyWallet`.
+- Proxy local/Vercel para la Polymarket Data API bajo `/api/polymarket/*`.
 
-### 🪙 P&L por token (colapsable)
-Desglose automático por activo detectado en el título del mercado (BTC, ETH, SOL, XRP…):
-- P&L Neto y Fees por token
-- Winrate individual (X ganadas / N totales)
-- Capital invertido por token
+## Optimización actual
 
-### 🔍 Análisis por mercado (expandible al hacer clic)
-Cada fila muestra en cabecera:
-- Número total de trades, compras (B) vs ventas (S)
-- Capital invertido y duración del mercado
-- P&L Bruto, Fees y P&L Neto
-- Badge **"⚠ Fees consuming X% of profits"** (naranja/rojo si impacto > 10 / 30%)
-
-Al expandir, se despliega un grid con:
-| Métrica | Descripción |
-|---|---|
-| P&L Bruto / Fees / Neto | Desglose completo de resultado |
-| Compras / Ventas | Nº y volumen por lado |
-| Precio medio entrada | Precio ponderado de todas las compras |
-| Precio medio salida | Precio ponderado de todas las ventas |
-| Tamaño medio de trade | Unidades medias por operación |
-| Primer / Último trade | Timestamps de apertura y cierre |
-| Duración | Tiempo entre primera y última operación |
-
-Además incluye el **log individual** de cada trade: lado, precio, tamaño, fecha/hora y fee %.
-
-### 🔎 Filtros
-- **Por resultado:** Todos / Ganadoras / Perdedoras
-- **Por token:** pills dinámicos por cada criptomoneda detectada
-- **Por fecha:** selector de fecha con botón de reset
-
-### ⚠️ Alerta de fees global
-Si el total de fees supera el 5% del P&L bruto, se muestra un banner de advertencia con el porcentaje exacto.
-
----
+- Los cálculos pesados del dashboard están memoizados con `useMemo`.
+- El resumen global se calcula en una sola pasada sobre los mercados filtrados.
+- Los mercados se agrupan con `Map` y se normalizan los valores numéricos antes de calcular P&L.
+- Cada mercado guarda su `crypto`, `firstBuy`, `hasManual` y `sortedTrades` durante la agrupación para evitar búsquedas y ordenaciones repetidas en render.
+- Los trades manuales del repositorio se cachean tras la primera lectura y se filtran por wallet antes de fusionarlos con la API.
+- La carga inicial evita setters síncronos dentro de `useEffect`, cumpliendo las reglas actuales de React Hooks.
 
 ## API utilizada
 
-SigmaTracker consume la **Polymarket Data API**:
+SigmaTracker consume la Polymarket Data API:
 
-- **Base URL:** `https://data-api.polymarket.com`
-- **Documentación oficial:** [https://docs.polymarket.com](https://docs.polymarket.com)
-
-### Endpoint principal
-
-| Método | Endpoint | Descripción |
-|--------|----------|-------------|
-| `GET` | `/trades?user={wallet}&limit={n}&offset={n}&takerOnly={bool}` | Historial de trades de una wallet |
-
-**Ejemplo:**
-```
-GET https://data-api.polymarket.com/trades?user=0xe1c70...&limit=500&offset=0&takerOnly=false
+```text
+GET https://data-api.polymarket.com/trades?user={wallet}&limit=500&offset=0&takerOnly=false
 ```
 
-### Proxy serverless (CORS)
+En la app se llama mediante:
 
-Todas las peticiones se enrutan a través de un proxy serverless incluido en el proyecto:
+```text
+/api/polymarket/trades?user={wallet}&limit=500&offset=0&takerOnly=false
+```
 
-- **Ruta local:** `/api/polymarket/[...path]`
-- **Archivo:** `api/polymarket/[...path].js`
-- **Funcionamiento:** Reenvía cualquier petición de `/api/polymarket/*` hacia `https://data-api.polymarket.com/*`, propagando método, cabeceras y cuerpo.
+En desarrollo, Vite redirige esa ruta con `server.proxy`. En Vercel, la función serverless de `api/polymarket/[...path].js` actúa como proxy.
 
----
+## Trades manuales
 
-## Instalación y uso local
+Los trades manuales viven en:
 
-1. Clona el repositorio:
-   ```bash
-   git clone <URL-del-repositorio>
-   cd SigmaTracker
-   ```
+```text
+public/manual-trades.json
+```
 
-2. Instala las dependencias:
-   ```bash
-   npm install
-   ```
+Cada entrada puede incluir `proxyWallet`. Cuando existe, SigmaTracker solo la mezcla con los datos de la wallet correspondiente. Esto evita que operaciones manuales de una wallet aparezcan al consultar otra.
 
-3. Inicia la aplicación en modo desarrollo:
-   ```bash
-   npm run dev
-   ```
+## Instalación
 
-   > **Nota:** En desarrollo local el proxy serverless no está activo. Para probarlo con el proxy, usa `vercel dev` ([Vercel CLI](https://vercel.com/docs/cli)).
+```bash
+npm install
+```
 
-4. Abre [http://localhost:5173](http://localhost:5173) en tu navegador.
+## Uso local
 
----
+```bash
+npm run dev
+```
 
-## Scripts disponibles
+Abre [http://localhost:5173](http://localhost:5173).
+
+## Scripts
 
 | Comando | Descripción |
-|---------|-------------|
-| `npm run dev` | Inicia el servidor de desarrollo con HMR |
-| `npm run build` | Genera el build de producción |
-| `npm run preview` | Previsualiza el build de producción |
-| `npm run lint` | Ejecuta ESLint sobre el proyecto |
+| --- | --- |
+| `npm run dev` | Inicia Vite con HMR. |
+| `npm run build` | Genera el build de producción. |
+| `npm run preview` | Sirve el build generado. |
+| `npm run lint` | Ejecuta ESLint sobre frontend y funciones API. |
 
----
+En Windows con PowerShell restringido, usa `npm.cmd run lint` o `npm.cmd run build`.
 
-## Estructura del proyecto
+## Estructura
 
-```
+```text
 SigmaTracker/
 ├── api/
+│   ├── manual-trades.js
+│   ├── polymarket.js
 │   └── polymarket/
-│       └── [...path].js   # Proxy serverless → Polymarket Data API
-├── public/                # Recursos estáticos (favicon, iconos)
+│       └── [...path].js
+├── public/
+│   ├── favicon.svg
+│   ├── icons.svg
+│   ├── manual-trades.json
+│   └── routes.json
 ├── src/
-│   ├── App.jsx            # Componente principal: lógica, cálculos y UI
-│   ├── App.css            # Estilos de la aplicación
-│   └── main.jsx           # Punto de entrada React
-├── vercel.json            # Configuración de despliegue en Vercel
-├── vite.config.js         # Configuración de Vite
-└── eslint.config.js       # Configuración de ESLint
+│   ├── App.css
+│   ├── App.jsx
+│   ├── index.css
+│   └── main.jsx
+├── eslint.config.js
+├── package.json
+├── vercel.json
+└── vite.config.js
 ```
 
----
+## Verificación
 
-## Tecnologías utilizadas
+```bash
+npm.cmd run lint
+npm.cmd run build
+```
 
-- [React 19](https://react.dev/)
-- [Vite 8](https://vitejs.dev/)
-- [JavaScript ES6+](https://developer.mozilla.org/es/docs/Web/JavaScript)
-- [Polymarket Data API](https://docs.polymarket.com)
-- [Vercel](https://vercel.com/) — despliegue + serverless functions
-- ESLint
+Ambos comandos deben terminar sin errores antes de desplegar.
 
----
+## Despliegue
 
-## Despliegue en Vercel
-
-El proyecto está configurado para desplegarse en **Vercel**. El proxy serverless se ejecuta automáticamente como una Vercel Function.
+El proyecto está preparado para Vercel:
 
 ```bash
 vercel deploy
 ```
 
----
+La función serverless del proxy se ejecuta automáticamente en producción.
 
 ## Licencia
 

@@ -134,6 +134,39 @@ body { background: #0d0f14; color: #e2e8f0; font-family: 'Inter', system-ui, san
   min-width: 160px;
   flex: 1;
 }
+.token-market-list {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #ffffff1a;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.token-market-row {
+  display: grid;
+  grid-template-columns: minmax(42px, auto) 1fr auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+  font-size: 11px;
+}
+.token-market-label {
+  color: #cbd5e1;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.token-market-meta {
+  color: #64748b;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.token-market-pnl {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 
 /* ── Mobile (≤ 520px · iPhone Pro Max y similares) ── */
 @media (max-width: 520px) {
@@ -199,6 +232,10 @@ body { background: #0d0f14; color: #e2e8f0; font-family: 'Inter', system-ui, san
   /* Token cards: columna única */
   .token-grid { flex-direction: column; }
   .token-card { min-width: 0; }
+  .token-market-row {
+    grid-template-columns: 42px 1fr auto;
+    gap: 6px;
+  }
 }
 
 /* Enlace de mercado */

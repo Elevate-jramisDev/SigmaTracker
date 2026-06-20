@@ -1,7 +1,12 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import "./App.css";
 
-const DEFAULT_WALLET = "0xe1c70472413b93FD6FFEDF45869c7AA0A909ACd5";
+const WALLET_OPTIONS = [
+  { key: "tst", label: "TST", address: "0xEd084e26667b5668A17e34391C24f81767F15F2e" },
+  { key: "pro", label: "PRO", address: "0xe1c70472413b93FD6FFEDF45869c7AA0A909ACd5" },
+];
+const DEFAULT_WALLET_OPTION = WALLET_OPTIONS.find(option => option.key === "pro") || WALLET_OPTIONS[0];
+const DEFAULT_WALLET = DEFAULT_WALLET_OPTION.address;
 
 const CRYPTO_META = {
   bitcoin: { sym: "₿", col: { bg: "#f7931a22", border: "#f7931a", text: "#f7931a" } },
@@ -38,6 +43,15 @@ let manualTradesCache;
 
 function normalizeWallet(wallet = "") {
   return wallet.trim().toLowerCase();
+}
+
+function shortWallet(wallet = "") {
+  return wallet ? `${wallet.slice(0, 6)}...${wallet.slice(-4)}` : "";
+}
+
+function getWalletOptionByAddress(wallet = "") {
+  const normalizedWallet = normalizeWallet(wallet);
+  return WALLET_OPTIONS.find(option => normalizeWallet(option.address) === normalizedWallet);
 }
 
 function getCrypto(title = "") {
@@ -108,7 +122,10 @@ function groupByMarket(trades) {
     if (timestamp > m.lastTs) m.lastTs = timestamp;
     if (timestamp < m.firstTs) m.firstTs = timestamp;
     if (!m.icon && t.icon) m.icon = t.icon;
-    if (t._manual) m.hasManual = true;
+    if (t._manual) {
+      m.hasManual = true;
+      m.manualWalletLabel = t._manualWalletLabel || m.manualWalletLabel;
+    }
   }
   return Array.from(map.values()).map(m => {
     const grossPnl     = m.sellRevenue - m.buyCost;
@@ -253,14 +270,15 @@ async function fetchManualFromRepo() {
 
 function getManualTradesForWallet(wallet, repoTrades) {
   const normalizedWallet = normalizeWallet(wallet);
+  const walletOption = getWalletOptionByAddress(wallet);
   return repoTrades
-    .filter(t => !t.proxyWallet || normalizeWallet(t.proxyWallet) === normalizedWallet)
-    .map(t => ({ ...t, _manual: true }));
+    .filter(t => t.proxyWallet && normalizeWallet(t.proxyWallet) === normalizedWallet)
+    .map(t => ({ ...t, _manual: true, _manualWalletLabel: walletOption?.label || shortWallet(wallet) }));
 }
 
 
 export default function App() {
-  const [inputWallet, setInputWallet] = useState(DEFAULT_WALLET);
+  const [selectedWalletKey, setSelectedWalletKey] = useState(DEFAULT_WALLET_OPTION.key);
   const [trades,   setTrades]   = useState([]);
   const [loading,  setLoading]  = useState(true);
   const [error,    setError]    = useState(null);
@@ -303,6 +321,10 @@ export default function App() {
 
   // Trades fusionados (API + manuales del repositorio)
   const allTrades = useMemo(() => [...trades, ...manualTrades], [trades, manualTrades]);
+  const selectedWallet = useMemo(
+    () => WALLET_OPTIONS.find(option => option.key === selectedWalletKey) || DEFAULT_WALLET_OPTION,
+    [selectedWalletKey],
+  );
 
   const load = useCallback(async (addr, { initial = false } = {}) => {
     const wallet = normalizeWallet(addr);
@@ -334,6 +356,12 @@ export default function App() {
     }, 0);
     return () => clearTimeout(timer);
   }, [load]);
+
+  function selectWallet(key) {
+    const walletOption = WALLET_OPTIONS.find(option => option.key === key) || DEFAULT_WALLET_OPTION;
+    setSelectedWalletKey(walletOption.key);
+    void load(walletOption.address);
+  }
 
   const markets  = useMemo(() => groupByMarket(allTrades), [allTrades]);
   const filtered = useMemo(() => markets.filter(m => {
@@ -383,13 +411,25 @@ export default function App() {
           </div>
         </div>
         <div className="search-row">
-          <input className="wallet-input" value={inputWallet}
-            onChange={e => setInputWallet(e.target.value)}
-            placeholder="0x..."
-            onKeyDown={e => e.key === "Enter" && load(inputWallet)} />
-          <button className="btn-load" onClick={() => load(inputWallet)}>Cargar</button>
+          <select
+            className="wallet-select"
+            value={selectedWalletKey}
+            onChange={e => selectWallet(e.target.value)}
+            disabled={loading}
+            title={selectedWallet.address}
+          >
+            {WALLET_OPTIONS.map(option => (
+              <option key={option.key} value={option.key}>
+                {option.label} - {shortWallet(option.address)}
+              </option>
+            ))}
+          </select>
+          <span className="wallet-address" title={selectedWallet.address}>
+            {selectedWallet.address}
+          </span>
+          <button className="btn-load" onClick={() => load(selectedWallet.address)}>Cargar</button>
           <button
-            title={manualTrades.length > 0 ? `${manualTrades.length} trades manuales cargados desde el repositorio` : "No hay trades manuales en el repositorio"}
+            title={manualTrades.length > 0 ? `${manualTrades.length} trades manuales ${selectedWallet.label} cargados desde el repositorio` : `No hay trades manuales ${selectedWallet.label} en el repositorio`}
             style={{
               background: manualTrades.length > 0 ? "#7c3aed33" : "#1a1f2e",
               border: `1px solid ${manualTrades.length > 0 ? "#7c3aed" : "#1e2535"}`,
@@ -398,6 +438,7 @@ export default function App() {
               fontSize: 12, fontWeight: 600, cursor: "default",
               display: "flex", alignItems: "center", gap: 6,
             }}>
+            <span>{selectedWallet.label}</span>
             ✏ Manuales
             {manualTrades.length > 0 && (
               <span style={{
@@ -723,6 +764,13 @@ export default function App() {
                             border: "1px solid #7c3aed66",
                           }}>✏ manual</span>
                         )}
+                        {hasManual && (
+                          <span style={{
+                            fontSize: 10, fontWeight: 700, borderRadius: 4, padding: "1px 6px",
+                            background: "#0f172a", color: "#a78bfa",
+                            border: "1px solid #7c3aed44",
+                          }}>{m.manualWalletLabel || selectedWallet.label}</span>
+                        )}
                         <span style={{
                           fontSize: 10, fontWeight: 700, borderRadius: 4, padding: "1px 6px",
                           background: "#0f172a", color: "#38bdf8",
@@ -895,7 +943,7 @@ export default function App() {
                                   background: "#7c3aed33", color: "#a78bfa",
                                   border: "1px solid #7c3aed66", borderRadius: 4,
                                   padding: "1px 5px",
-                                }}>manual</span>
+                                }}>{t._manualWalletLabel || selectedWallet.label} manual</span>
                               )}
                             </div>
                           ))}

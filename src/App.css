@@ -14,13 +14,20 @@ body { background: #0d0f14; color: #e2e8f0; font-family: 'Inter', system-ui, san
 .dot { width: 8px; height: 8px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 8px #4ade80; }
 .header-label { font-size: 13px; color: #64748b; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
 
-.search-row { display: flex; gap: 8px; }
-.wallet-input {
-  flex: 1; background: #1e2535; border: 1px solid #2d3748;
+.search-row { display: flex; gap: 8px; align-items: center; }
+.wallet-select {
+  background: #1e2535; border: 1px solid #2d3748;
   border-radius: 8px; padding: 8px 12px; color: #e2e8f0;
-  font-size: 12px; font-family: monospace;
+  font-size: 12px; font-weight: 700; min-width: 154px;
 }
-.wallet-input:focus { outline: none; border-color: #3b82f6; }
+.wallet-select:focus { outline: none; border-color: #3b82f6; }
+.wallet-select:disabled { opacity: .65; cursor: wait; }
+.wallet-address {
+  flex: 1; min-width: 0; background: #1e2535; border: 1px solid #2d3748;
+  border-radius: 8px; padding: 8px 12px; color: #94a3b8;
+  font-size: 12px; font-family: monospace; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
 .btn-load {
   background: #3b82f6; border: none; border-radius: 8px;
   padding: 8px 18px; color: #fff; font-size: 13px;
@@ -174,6 +181,9 @@ body { background: #0d0f14; color: #e2e8f0; font-family: 'Inter', system-ui, san
   /* Header & main: menos padding lateral */
   .header { padding: 14px 12px; }
   .main   { padding: 12px 10px; }
+  .search-row { flex-wrap: wrap; }
+  .wallet-select { flex: 1 1 130px; min-width: 130px; }
+  .wallet-address { order: 3; flex: 1 1 100%; }
 
   /* Cards: 2 columnas */
   .cards {

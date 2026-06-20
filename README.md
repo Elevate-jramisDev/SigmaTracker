@@ -8,6 +8,7 @@ SigmaTracker es una aplicación web para seguir y analizar operaciones de una wa
 - Agrupación de trades por mercado con detalle expandible y log individual de operaciones.
 - Resumen colapsable de P&L por token detectado en el título del mercado.
 - Filtros por resultado, token, fecha exacta y ventanas relativas de 1h a 30d.
+- Selector de wallet con las cuentas TST y PRO.
 - Carga de trades manuales desde `public/manual-trades.json`, filtrados por `proxyWallet`.
 - Proxy local/Vercel para la Polymarket Data API bajo `/api/polymarket/*`.
 
@@ -44,7 +45,7 @@ Los trades manuales viven en:
 public/manual-trades.json
 ```
 
-Cada entrada puede incluir `proxyWallet`. Cuando existe, SigmaTracker solo la mezcla con los datos de la wallet correspondiente. Esto evita que operaciones manuales de una wallet aparezcan al consultar otra.
+Cada entrada debe incluir `proxyWallet`. SigmaTracker solo mezcla manuales cuyo `proxyWallet` coincide con la wallet elegida en el selector, separando asi los registros TST y PRO.
 
 ## Instalación
 

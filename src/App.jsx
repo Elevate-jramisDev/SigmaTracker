@@ -842,7 +842,6 @@ export default function App() {
                       }}>
                         {[
                           { label:"P&L Bruto",            val:fmt(m.grossPnl)+" $",                      col:m.grossPnl>=0?"#4ade80":"#f87171" },
-                          { label:"Fees pagadas",          val:"-"+m.totalFees.toFixed(4)+" $",           col:"#fb923c" },
                           { label:"P&L Neto",              val:fmt(m.pnl)+" $",                           col:m.pnl>=0?"#4ade80":"#f87171" },
                           { label:"Compras",               val:`${m.numBuys} (${m.buyCost.toFixed(2)}$)`, col:"#94a3b8" },
                           { label:"Ventas",                val:`${m.numSells} (${m.sellRevenue.toFixed(2)}$)`, col:"#94a3b8" },

@@ -242,8 +242,12 @@ function getDashboardStats(markets, trades) {
   };
 }
 
-const fmt      = n => (n >= 0 ? "+" : "") + n.toFixed(3);
-const fmtPct   = n => (n >= 0 ? "+" : "") + n.toFixed(1) + "%";
+const fmtNum   = (n, decimals) => {
+  const [intPart, decPart] = Math.abs(n).toFixed(decimals).split(".");
+  return (n < 0 ? "-" : "") + intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ".") + "," + decPart;
+};
+const fmt      = n => (n >= 0 ? "+" : "") + fmtNum(n, 3);
+const fmtPct   = n => (n >= 0 ? "+" : "") + fmtNum(Math.abs(n), 1).replace(/^-/, "") + "%";
 const fmtDate  = ts => new Date(ts * 1000).toLocaleDateString("es-ES", {
   month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
 });
@@ -568,7 +572,7 @@ export default function App() {
                           {c.fees > 0 && (
                             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
                               <span style={{ color: "#64748b" }}>Fees</span>
-                              <span style={{ color: "#fb923c" }}>-{c.fees.toFixed(3)} $</span>
+                              <span style={{ color: "#fb923c" }}>-{fmtNum(c.fees, 3)} $</span>
                             </div>
                           )}
                           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
@@ -577,7 +581,7 @@ export default function App() {
                           </div>
                           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
                             <span style={{ color: "#64748b" }}>Invertido</span>
-                            <span style={{ color: "#94a3b8" }}>{c.cost.toFixed(2)} $</span>
+                            <span style={{ color: "#94a3b8" }}>{fmtNum(c.cost, 2)} $</span>
                           </div>
                         </div>
                         {c.markets.length > 0 && (

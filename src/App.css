@@ -28,13 +28,6 @@ body { background: #0d0f14; color: #e2e8f0; font-family: 'Inter', system-ui, san
   font-size: 12px; font-family: monospace; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap;
 }
-.btn-load {
-  background: #3b82f6; border: none; border-radius: 8px;
-  padding: 8px 18px; color: #fff; font-size: 13px;
-  font-weight: 600; cursor: pointer; transition: background .15s;
-}
-.btn-load:hover { background: #2563eb; }
-
 /* States */
 .state { text-align: center; padding: 60px; color: #64748b; font-size: 14px; }
 .state.error { margin: 24px; background: #2d1515; border: 1px solid #ef4444; border-radius: 10px; padding: 12px 16px; color: #fca5a5; text-align: left; }

@@ -8,8 +8,9 @@ SigmaTracker es una aplicación web para seguir y analizar operaciones de una wa
 - Agrupación de trades por mercado con detalle expandible y log individual de operaciones.
 - Resumen colapsable de P&L por token detectado en el título del mercado.
 - Filtros por resultado, token, fecha exacta y ventanas relativas de 1h a 30d.
-- Selector de wallet con las cuentas TST y PRO.
-- Carga de trades manuales desde `public/manual-trades.json`, filtrados por `proxyWallet`.
+- Selector de wallet con las cuentas TST y PRO; cambiar la wallet dispara la recarga automática.
+- Carga de trades manuales desde `public/manual-trades.json`, filtrados por `proxyWallet`, sin controles manuales visibles en el header.
+- Valoración de mercados cerrados con `realizedPnl` de `closed-positions` para evitar que una posición ganadora sin trade `SELL` aparezca como pérdida.
 - Proxy local/Vercel para la Polymarket Data API bajo `/api/polymarket/*`.
 
 ## Optimización actual
@@ -19,23 +20,25 @@ SigmaTracker es una aplicación web para seguir y analizar operaciones de una wa
 - Los mercados se agrupan con `Map` y se normalizan los valores numéricos antes de calcular P&L.
 - Cada mercado guarda su `crypto`, `firstBuy`, `hasManual` y `sortedTrades` durante la agrupación para evitar búsquedas y ordenaciones repetidas en render.
 - Los trades manuales del repositorio se cachean tras la primera lectura y se filtran por wallet antes de fusionarlos con la API.
-- La carga inicial evita setters síncronos dentro de `useEffect`, cumpliendo las reglas actuales de React Hooks.
+- La carga inicial evita setters síncronos dentro de `useEffect`, aborta peticiones obsoletas al cambiar de wallet y muestra progreso durante la paginación.
+- Las posiciones cerradas se paginan por wallet, se filtran localmente por `conditionId` y se fusionan con los mercados antes de calcular P&L.
 
 ## API utilizada
 
 SigmaTracker consume la Polymarket Data API:
 
 ```text
-GET https://data-api.polymarket.com/trades?user={wallet}&limit=500&offset=0&takerOnly=false
+GET https://data-api.polymarket.com/trades?user={wallet}&limit=500&offset={0,500,1000...}&takerOnly=false
 ```
 
 En la app se llama mediante:
 
 ```text
-/api/polymarket/trades?user={wallet}&limit=500&offset=0&takerOnly=false
+/api/polymarket/trades?user={wallet}&limit=500&offset={0,500,1000...}&takerOnly=false
+/api/polymarket/closed-positions?user={wallet}&limit=50&offset={0,50,100...}
 ```
 
-En desarrollo, Vite redirige esa ruta con `server.proxy`. En Vercel, la función serverless de `api/polymarket/[...path].js` actúa como proxy.
+La app pagina secuencialmente en bloques de 500 trades hasta que la API devuelve una pagina incompleta, evitando quedarse solo con la ventana mas reciente. Despues pagina `closed-positions` en bloques de 50 posiciones cerradas y usa `realizedPnl` cuando existe una posicion cerrada, de forma que los mercados resueltos sin trade `SELL` no aparezcan como perdidos por el coste de compra. En desarrollo, Vite redirige esa ruta con `server.proxy`. En Vercel, la función serverless de `api/polymarket/[...path].js` actúa como proxy.
 
 ## Trades manuales
 
@@ -45,7 +48,7 @@ Los trades manuales viven en:
 public/manual-trades.json
 ```
 
-Cada entrada debe incluir `proxyWallet`. SigmaTracker solo mezcla manuales cuyo `proxyWallet` coincide con la wallet elegida en el selector, separando asi los registros TST y PRO.
+Cada entrada debe incluir `proxyWallet`. SigmaTracker solo mezcla manuales cuyo `proxyWallet` coincide con la wallet elegida en el selector, separando asi los registros TST y PRO. Los manuales se aplican en segundo plano y siguen marcados dentro del detalle de cada mercado cuando correspondan.
 
 ## Instalación
 

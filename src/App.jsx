@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import "./App.css";
 
 const WALLET_OPTIONS = [
@@ -39,10 +39,21 @@ const MARKET_TIMEFRAMES = [
   { key: "1d",  label: "1 dia", patterns: [/(^|[-_\s])1d($|[-_\s])/, /\b1\s*(d|day|days|dia|dias)\b/, /\bdaily\b/] },
 ];
 const OTHER_MARKET_TIMEFRAME = { key: "other", label: "Otros" };
+const TRADE_PAGE_LIMIT = 500;
+const MAX_TRADE_PAGES = 200;
+const CLOSED_POSITION_PAGE_LIMIT = 50;
+const MAX_CLOSED_POSITION_PAGES = 200;
+const CLOSED_POSITION_BATCH_SIZE = 25;
+const MAX_CLOSED_POSITION_BATCH_PAGES = 20;
+const API_RETRY_DELAYS_MS = [400, 1200, 2500];
 let manualTradesCache;
 
 function normalizeWallet(wallet = "") {
   return wallet.trim().toLowerCase();
+}
+
+function normalizeConditionId(conditionId = "") {
+  return String(conditionId).trim().toLowerCase();
 }
 
 function shortWallet(wallet = "") {
@@ -84,10 +95,50 @@ function addMarketStats(stats, market) {
   if (market.pnl > 0) stats.wins++;
 }
 
-function groupByMarket(trades) {
+function getClosedPositionCost(position = {}) {
+  const totalBought = Number(position.totalBought) || 0;
+  const avgPrice = Number(position.avgPrice) || 0;
+  return totalBought * avgPrice;
+}
+
+function groupClosedPositionsByMarket(closedPositions = []) {
   const map = new Map();
+  for (const position of closedPositions) {
+    const id = normalizeConditionId(position.conditionId);
+    if (!id) continue;
+    if (!map.has(id)) {
+      map.set(id, {
+        positions: [],
+        realizedPnl: 0,
+        costBasis: 0,
+        exitValue: 0,
+        totalBought: 0,
+        winningOutcomes: [],
+        lastSettlementTs: 0,
+      });
+    }
+    const entry = map.get(id);
+    const realizedPnl = Number(position.realizedPnl);
+    const totalBought = Number(position.totalBought) || 0;
+    const curPrice = Number(position.curPrice);
+    const timestamp = Number(position.timestamp) || 0;
+
+    entry.positions.push(position);
+    if (Number.isFinite(realizedPnl)) entry.realizedPnl += realizedPnl;
+    entry.costBasis += getClosedPositionCost(position);
+    entry.totalBought += totalBought;
+    if (Number.isFinite(curPrice)) entry.exitValue += totalBought * curPrice;
+    if (curPrice >= 0.99 && position.outcome) entry.winningOutcomes.push(position.outcome);
+    if (timestamp > entry.lastSettlementTs) entry.lastSettlementTs = timestamp;
+  }
+  return map;
+}
+
+function groupByMarket(trades, closedPositions = []) {
+  const map = new Map();
+  const closedByMarket = groupClosedPositionsByMarket(closedPositions);
   for (const t of trades) {
-    const id = (t.conditionId || t.transactionHash || `${t.asset || "market"}-${t.timestamp || 0}`).toLowerCase();
+    const id = (normalizeConditionId(t.conditionId) || String(t.transactionHash || `${t.asset || "market"}-${t.timestamp || 0}`).toLowerCase());
     if (!map.has(id)) {
       map.set(id, {
         ...t,
@@ -128,17 +179,22 @@ function groupByMarket(trades) {
     }
   }
   return Array.from(map.values()).map(m => {
-    const grossPnl     = m.sellRevenue - m.buyCost;
-    const pnl          = grossPnl - m.totalFees;
-    const pct          = m.buyCost > 0 ? (pnl / m.buyCost) * 100 : 0;
+    const settlement   = closedByMarket.get(m.conditionId);
+    const tradeGrossPnl = m.sellRevenue - m.buyCost;
+    const tradePnl     = tradeGrossPnl - m.totalFees;
+    const hasSettlement = settlement && Number.isFinite(settlement.realizedPnl);
+    const pnl          = hasSettlement ? settlement.realizedPnl : tradePnl;
+    const grossPnl     = hasSettlement ? settlement.realizedPnl + m.totalFees : tradeGrossPnl;
+    const costBasis    = m.buyCost > 0 ? m.buyCost : settlement?.costBasis || 0;
+    const pct          = costBasis > 0 ? (pnl / costBasis) * 100 : 0;
     const feeImpact    = grossPnl > 0 ? (m.totalFees / grossPnl) * 100 : 0;
     const avgEntryPrice = m.totalBuySize  > 0 ? m.buyCost      / m.totalBuySize  : 0;
-    const avgExitPrice  = m.totalSellSize > 0 ? m.sellRevenue  / m.totalSellSize : 0;
+    const avgExitPrice  = m.totalSellSize > 0 ? m.sellRevenue  / m.totalSellSize : settlement?.totalBought > 0 ? settlement.exitValue / settlement.totalBought : 0;
     const totalTrades  = m.numBuys + m.numSells;
     const avgTradeSize = totalTrades > 0 ? (m.totalBuySize + m.totalSellSize) / totalTrades : 0;
     const duration     = (m.firstTs < Infinity && m.lastTs > m.firstTs) ? m.lastTs - m.firstTs : 0;
     const sortedTrades = [...m.trades].sort((a, b) => a.timestamp - b.timestamp);
-    return { ...m, grossPnl, pnl, pct, feeImpact, avgEntryPrice, avgExitPrice, avgTradeSize, duration, sortedTrades, crypto: getCrypto(m.title), marketTimeframe: getMarketTimeframe(m) };
+    return { ...m, grossPnl, pnl, pct, feeImpact, avgEntryPrice, avgExitPrice, avgTradeSize, duration, sortedTrades, settlement, hasSettlement, crypto: getCrypto(m.title), marketTimeframe: getMarketTimeframe(m) };
   }).sort((a, b) => b.lastTs - a.lastTs);
 }
 
@@ -272,6 +328,233 @@ async function fetchManualFromRepo() {
   return manualTradesCache;
 }
 
+function getTradesFromPayload(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.trades)) return payload.trades;
+  if (Array.isArray(payload?.data)) return payload.data;
+  return null;
+}
+
+function getClosedPositionsFromPayload(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.positions)) return payload.positions;
+  if (Array.isArray(payload?.data)) return payload.data;
+  return null;
+}
+
+function getUniqueConditionIds(trades) {
+  return [...new Set(trades.map(t => normalizeConditionId(t.conditionId)).filter(Boolean))];
+}
+
+function chunkArray(items, size) {
+  const chunks = [];
+  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
+  return chunks;
+}
+
+function getTradeFingerprint(trade = {}) {
+  return [
+    trade.transactionHash,
+    trade.logIndex,
+    trade.timestamp,
+    trade.conditionId,
+    trade.asset,
+    trade.side,
+    trade.size,
+    trade.price,
+  ].map(value => String(value ?? "")).join("|");
+}
+
+function getPageFingerprint(page) {
+  if (page.length === 0) return "empty";
+  return `${page.length}:${getTradeFingerprint(page[0])}:${getTradeFingerprint(page[page.length - 1])}`;
+}
+
+function getPositionFingerprint(position = {}) {
+  return [
+    position.conditionId,
+    position.asset,
+    position.outcome,
+    position.timestamp,
+    position.realizedPnl,
+    position.curPrice,
+  ].map(value => String(value ?? "")).join("|");
+}
+
+function getPositionPageFingerprint(page) {
+  if (page.length === 0) return "empty";
+  return `${page.length}:${getPositionFingerprint(page[0])}:${getPositionFingerprint(page[page.length - 1])}`;
+}
+
+function isTransientHttpStatus(status) {
+  return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+}
+
+function sleep(ms, signal) {
+  if (!ms) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => {
+      clearTimeout(timeoutId);
+      reject(new DOMException("Aborted", "AbortError"));
+    }, { once: true });
+  });
+}
+
+async function fetchJsonWithRetry(url, { signal, label }) {
+  let lastError;
+  for (let attempt = 0; attempt <= API_RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      const res = await fetch(url, { signal });
+      if (res.ok) return res.json();
+      if (!isTransientHttpStatus(res.status) || attempt === API_RETRY_DELAYS_MS.length) {
+        throw new Error(`${label} HTTP ${res.status}`);
+      }
+      lastError = new Error(`${label} HTTP ${res.status}`);
+    } catch (error) {
+      if (error.name === "AbortError" || attempt === API_RETRY_DELAYS_MS.length) throw error;
+      lastError = error;
+    }
+    await sleep(API_RETRY_DELAYS_MS[attempt], signal);
+  }
+  throw lastError || new Error(`${label} sin respuesta`);
+}
+
+function dedupeClosedPositions(positions) {
+  const map = new Map();
+  for (const position of positions) {
+    map.set(getPositionFingerprint(position), position);
+  }
+  return [...map.values()];
+}
+
+async function fetchPolymarketTrades(wallet, { signal, onPage } = {}) {
+  const allTrades = [];
+  const seenPages = new Set();
+  let offset = 0;
+
+  for (let page = 1; page <= MAX_TRADE_PAGES; page++) {
+    const params = new URLSearchParams({
+      user: wallet,
+      limit: String(TRADE_PAGE_LIMIT),
+      offset: String(offset),
+      takerOnly: "false",
+    });
+    const res = await fetch(`/api/polymarket/trades?${params}`, { signal });
+    if (!res.ok) throw new Error(`Polymarket API HTTP ${res.status} en offset ${offset}`);
+
+    const payload = await res.json();
+    const pageTrades = getTradesFromPayload(payload);
+    if (!pageTrades) throw new Error("Respuesta inesperada de Polymarket API");
+
+    const fingerprint = getPageFingerprint(pageTrades);
+    if (pageTrades.length > 0 && seenPages.has(fingerprint)) {
+      throw new Error(`Polymarket API devolvio una pagina repetida en offset ${offset}`);
+    }
+    seenPages.add(fingerprint);
+
+    allTrades.push(...pageTrades);
+    onPage?.({ page, loaded: allTrades.length });
+
+    if (pageTrades.length < TRADE_PAGE_LIMIT) return allTrades;
+    offset += TRADE_PAGE_LIMIT;
+  }
+
+  throw new Error(`Historico incompleto: limite de seguridad alcanzado con ${allTrades.length} trades`);
+}
+
+async function fetchClosedPositionsByWallet(wallet, conditionIds, { signal, onBatch } = {}) {
+  if (conditionIds.length === 0) return [];
+
+  const closedPositions = [];
+  const conditionSet = new Set(conditionIds);
+  const seenPages = new Set();
+
+  for (let page = 1; page <= MAX_CLOSED_POSITION_PAGES; page++) {
+    const offset = (page - 1) * CLOSED_POSITION_PAGE_LIMIT;
+    const params = new URLSearchParams({
+      user: wallet,
+      limit: String(CLOSED_POSITION_PAGE_LIMIT),
+      offset: String(offset),
+      sortBy: "TIMESTAMP",
+      sortDirection: "DESC",
+    });
+    const payload = await fetchJsonWithRetry(`/api/polymarket/closed-positions?${params}`, {
+      signal,
+      label: `Polymarket closed-positions en offset ${offset}`,
+    });
+    const pagePositions = getClosedPositionsFromPayload(payload);
+    if (!pagePositions) throw new Error("Respuesta inesperada de Polymarket closed-positions");
+
+    const fingerprint = getPositionPageFingerprint(pagePositions);
+    if (pagePositions.length > 0 && seenPages.has(fingerprint)) {
+      throw new Error(`Polymarket closed-positions devolvio una pagina repetida en offset ${offset}`);
+    }
+    seenPages.add(fingerprint);
+
+    closedPositions.push(...pagePositions.filter(position => conditionSet.has(normalizeConditionId(position.conditionId))));
+    onBatch?.({ page, loaded: closedPositions.length, mode: "wallet" });
+
+    if (pagePositions.length < CLOSED_POSITION_PAGE_LIMIT) return closedPositions;
+  }
+
+  throw new Error(`Historico de posiciones cerradas incompleto: limite de seguridad alcanzado con ${closedPositions.length} posiciones`);
+}
+
+async function fetchClosedPositionsByMarkets(wallet, conditionIds, { signal, onBatch } = {}) {
+  if (conditionIds.length === 0) return [];
+
+  const closedPositions = [];
+  const batches = chunkArray(conditionIds, CLOSED_POSITION_BATCH_SIZE);
+
+  for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+    const batch = batches[batchIndex];
+
+    for (let page = 1; page <= MAX_CLOSED_POSITION_BATCH_PAGES; page++) {
+      const offset = (page - 1) * CLOSED_POSITION_PAGE_LIMIT;
+      const params = new URLSearchParams({
+        user: wallet,
+        market: batch.join(","),
+        limit: String(CLOSED_POSITION_PAGE_LIMIT),
+        offset: String(offset),
+        sortBy: "TIMESTAMP",
+        sortDirection: "DESC",
+      });
+      const payload = await fetchJsonWithRetry(`/api/polymarket/closed-positions?${params}`, {
+        signal,
+        label: `Polymarket closed-positions fallback lote ${batchIndex + 1}/${batches.length}`,
+      });
+      const pagePositions = getClosedPositionsFromPayload(payload);
+      if (!pagePositions) throw new Error("Respuesta inesperada de Polymarket closed-positions fallback");
+
+      closedPositions.push(...pagePositions);
+      onBatch?.({ page, loaded: closedPositions.length, mode: "markets", batch: batchIndex + 1, batches: batches.length });
+
+      if (pagePositions.length < CLOSED_POSITION_PAGE_LIMIT) break;
+      if (page === MAX_CLOSED_POSITION_BATCH_PAGES) {
+        throw new Error("Historico de posiciones cerradas por mercados incompleto: limite de seguridad alcanzado");
+      }
+    }
+  }
+
+  return closedPositions;
+}
+
+async function fetchPolymarketClosedPositions(wallet, conditionIds, { signal, onBatch } = {}) {
+  try {
+    return dedupeClosedPositions(await fetchClosedPositionsByWallet(wallet, conditionIds, { signal, onBatch }));
+  } catch (walletError) {
+    if (walletError.name === "AbortError") throw walletError;
+  }
+
+  try {
+    return dedupeClosedPositions(await fetchClosedPositionsByMarkets(wallet, conditionIds, { signal, onBatch }));
+  } catch (marketError) {
+    if (marketError.name === "AbortError") throw marketError;
+    return [];
+  }
+}
+
 function getManualTradesForWallet(wallet, repoTrades) {
   const normalizedWallet = normalizeWallet(wallet);
   const walletOption = getWalletOptionByAddress(wallet);
@@ -284,7 +567,9 @@ function getManualTradesForWallet(wallet, repoTrades) {
 export default function App() {
   const [selectedWalletKey, setSelectedWalletKey] = useState(DEFAULT_WALLET_OPTION.key);
   const [trades,   setTrades]   = useState([]);
+  const [closedPositions, setClosedPositions] = useState([]);
   const [loading,  setLoading]  = useState(true);
+  const [loadStatus, setLoadStatus] = useState("");
   const [error,    setError]    = useState(null);
   const [filter,     setFilter]     = useState("all");
   const [expanded,   setExpanded]   = useState({});
@@ -299,6 +584,8 @@ export default function App() {
   const today = new Date();
   const defaultDate = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
   const [filterDate, setFilterDate] = useState(defaultDate);
+  const loadSeqRef = useRef(0);
+  const loadAbortRef = useRef(null);
 
   function selectTimeFilter(key) {
     setTimeFilter(key);
@@ -332,25 +619,55 @@ export default function App() {
 
   const load = useCallback(async (addr, { initial = false } = {}) => {
     const wallet = normalizeWallet(addr);
+    const requestId = loadSeqRef.current + 1;
+    loadSeqRef.current = requestId;
+    loadAbortRef.current?.abort();
+    const controller = new AbortController();
+    loadAbortRef.current = controller;
+
     if (!initial) {
       setLoading(true);
       setError(null);
     }
+    setLoadStatus("Cargando historico de trades...");
     try {
-      const url = `/api/polymarket/trades?user=${encodeURIComponent(wallet)}&limit=500&offset=0&takerOnly=false`;
       const [apiTrades, repoTrades] = await Promise.all([
-        fetch(url).then(res => {
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          return res.json();
+        fetchPolymarketTrades(wallet, {
+          signal: controller.signal,
+          onPage: ({ page, loaded }) => {
+            if (loadSeqRef.current === requestId) {
+              setLoadStatus(`Cargando historico: ${loaded} trades en ${page} paginas...`);
+            }
+          },
         }),
         fetchManualFromRepo(),
       ]);
+      const walletManualTrades = getManualTradesForWallet(wallet, repoTrades);
+      const conditionIds = getUniqueConditionIds([...apiTrades, ...walletManualTrades]);
+      setLoadStatus(`Cargando resultados oficiales: 0/${conditionIds.length} mercados...`);
+      const apiClosedPositions = await fetchPolymarketClosedPositions(wallet, conditionIds, {
+        signal: controller.signal,
+        onBatch: ({ page, loaded, mode, batch, batches }) => {
+          if (loadSeqRef.current === requestId) {
+            const sourceLabel = mode === "markets" ? `fallback ${batch}/${batches}` : `${page} paginas`;
+            setLoadStatus(`Cargando resultados oficiales: ${loaded} posiciones en ${sourceLabel}...`);
+          }
+        },
+      });
+      if (loadSeqRef.current !== requestId) return;
       setTrades(Array.isArray(apiTrades) ? apiTrades : []);
-      setManualTrades(getManualTradesForWallet(wallet, repoTrades));
+      setManualTrades(walletManualTrades);
+      setClosedPositions(apiClosedPositions);
     } catch (e) {
-      setError(e.message);
+      if (e.name !== "AbortError" && loadSeqRef.current === requestId) {
+        setError(e.message);
+      }
     } finally {
-      setLoading(false);
+      if (loadAbortRef.current === controller) loadAbortRef.current = null;
+      if (loadSeqRef.current === requestId) {
+        setLoading(false);
+        setLoadStatus("");
+      }
     }
   }, []);
 
@@ -358,7 +675,10 @@ export default function App() {
     const timer = setTimeout(() => {
       void load(DEFAULT_WALLET, { initial: true });
     }, 0);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      loadAbortRef.current?.abort();
+    };
   }, [load]);
 
   function selectWallet(key) {
@@ -367,7 +687,7 @@ export default function App() {
     void load(walletOption.address);
   }
 
-  const markets  = useMemo(() => groupByMarket(allTrades), [allTrades]);
+  const markets  = useMemo(() => groupByMarket(allTrades, closedPositions), [allTrades, closedPositions]);
   const filtered = useMemo(() => markets.filter(m => {
     if (filter === "win"  && m.pnl <= 0) return false;
     if (filter === "loss" && m.pnl >= 0) return false;
@@ -431,30 +751,10 @@ export default function App() {
           <span className="wallet-address" title={selectedWallet.address}>
             {selectedWallet.address}
           </span>
-          <button className="btn-load" onClick={() => load(selectedWallet.address)}>Cargar</button>
-          <button
-            title={manualTrades.length > 0 ? `${manualTrades.length} trades manuales ${selectedWallet.label} cargados desde el repositorio` : `No hay trades manuales ${selectedWallet.label} en el repositorio`}
-            style={{
-              background: manualTrades.length > 0 ? "#7c3aed33" : "#1a1f2e",
-              border: `1px solid ${manualTrades.length > 0 ? "#7c3aed" : "#1e2535"}`,
-              borderRadius: 8, padding: "6px 13px",
-              color: manualTrades.length > 0 ? "#a78bfa" : "#64748b",
-              fontSize: 12, fontWeight: 600, cursor: "default",
-              display: "flex", alignItems: "center", gap: 6,
-            }}>
-            <span>{selectedWallet.label}</span>
-            ✏ Manuales
-            {manualTrades.length > 0 && (
-              <span style={{
-                background: "#7c3aed", color: "#fff", borderRadius: 10,
-                fontSize: 10, fontWeight: 700, padding: "1px 6px",
-              }}>{manualTrades.length}</span>
-            )}
-          </button>
         </div>
       </header>
 
-      {loading && <div className="state">⟳ Cargando trades…</div>}
+      {loading && <div className="state">{loadStatus || "⟳ Cargando trades…"}</div>}
       {error   && <div className="state error">⚠ {error}</div>}
 
       {!loading && !error && allTrades.length > 0 && (
@@ -780,6 +1080,17 @@ export default function App() {
                           background: "#0f172a", color: "#38bdf8",
                           border: "1px solid #0ea5e944",
                         }}>{m.marketTimeframe.label}</span>
+                        {m.hasSettlement && (
+                          <span
+                            title="P&L realizado desde Polymarket closed-positions"
+                            style={{
+                              fontSize: 10, fontWeight: 700, borderRadius: 4, padding: "1px 6px",
+                              background: "#064e3b44", color: "#34d399",
+                              border: "1px solid #10b98155",
+                            }}>
+                            oficial{m.settlement?.winningOutcomes?.length ? `: ${[...new Set(m.settlement.winningOutcomes)].join("/")}` : ""}
+                          </span>
+                        )}
                         {firstBuy?.outcome && (() => {
                           const isUp     = firstBuy.outcome.toLowerCase() === "up";
                           const entryC   = m.avgEntryPrice > 0 ? Math.round(m.avgEntryPrice * 100) : null;
@@ -964,7 +1275,7 @@ export default function App() {
       )}
 
       {!loading && !error && allTrades.length === 0 && (
-        <div className="state">Introduce una wallet y pulsa Cargar</div>
+        <div className="state">No hay trades para esta wallet</div>
       )}
     </div>
   );

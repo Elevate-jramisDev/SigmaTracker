@@ -7,7 +7,7 @@ SigmaTracker es una aplicación web para seguir y analizar operaciones de una wa
 - Dashboard de P&L bruto, fees, P&L neto, retorno, winrate, profit factor, racha, inversión y balance.
 - Agrupación de trades por mercado con detalle expandible y log individual de operaciones.
 - Resumen colapsable de P&L por token detectado en el título del mercado.
-- Filtros por resultado, token, fecha exacta y ventanas relativas de 1h a 30d.
+- Filtros por resultado, token, rango de fechas y ventanas relativas de 1h a 30d.
 - Selector de wallet con las cuentas TST y PRO; cambiar la wallet dispara la recarga automática.
 - Carga de trades manuales desde `public/manual-trades.json`, filtrados por `proxyWallet`, sin controles manuales visibles en el header.
 - Valoración de mercados cerrados con `realizedPnl` de `closed-positions` para evitar que una posición ganadora sin trade `SELL` aparezca como pérdida.

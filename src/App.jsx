@@ -563,6 +563,14 @@ function getManualTradesForWallet(wallet, repoTrades) {
     .map(t => ({ ...t, _manual: true, _manualWalletLabel: walletOption?.label || shortWallet(wallet) }));
 }
 
+function getDateInputValue(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function getMarketDateKey(timestampSecs) {
+  return getDateInputValue(new Date(timestampSecs * 1000));
+}
+
 
 export default function App() {
   const [selectedWalletKey, setSelectedWalletKey] = useState(DEFAULT_WALLET_OPTION.key);
@@ -581,9 +589,9 @@ export default function App() {
   // ── Trades manuales (cargados desde /manual-trades.json) ──
   const [manualTrades, setManualTrades] = useState([]);
 
-  const today = new Date();
-  const defaultDate = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
-  const [filterDate, setFilterDate] = useState(defaultDate);
+  const defaultDate = getDateInputValue();
+  const [filterDateFrom, setFilterDateFrom] = useState(defaultDate);
+  const [filterDateTo, setFilterDateTo] = useState(defaultDate);
   const loadSeqRef = useRef(0);
   const loadAbortRef = useRef(null);
 
@@ -591,12 +599,24 @@ export default function App() {
     setTimeFilter(key);
     if (key !== "all") {
       setTimeAnchorSecs(Math.floor(new Date().getTime() / 1000));
-      setFilterDate(""); // limpiar fecha exacta
+      setFilterDateFrom("");
+      setFilterDateTo("");
     }
   }
-  function selectDate(val) {
-    setFilterDate(val);
-    if (val) setTimeFilter("all"); // limpiar ventana temporal
+  function selectDateFrom(val) {
+    setFilterDateFrom(val);
+    setFilterDateTo(current => (val && current && current < val ? val : current));
+    if (val || filterDateTo) setTimeFilter("all");
+  }
+  function selectDateTo(val) {
+    setFilterDateTo(val);
+    setFilterDateFrom(current => (val && current && current > val ? val : current));
+    if (filterDateFrom || val) setTimeFilter("all");
+  }
+  function clearDateRange() {
+    setFilterDateFrom("");
+    setFilterDateTo("");
+    setTimeFilter("all");
   }
 
   const toggleExpand = id => setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
@@ -692,16 +712,17 @@ export default function App() {
     if (filter === "win"  && m.pnl <= 0) return false;
     if (filter === "loss" && m.pnl >= 0) return false;
     if (!RESULT_FILTERS.includes(filter) && m.crypto.key !== filter) return false;
-    // Filtro ventana temporal (tiene prioridad sobre fecha exacta)
+    // Filtro ventana temporal (tiene prioridad sobre el rango de fechas)
     if (timeFilter !== "all") {
       const opt = TIME_OPTIONS_BY_KEY.get(timeFilter);
       if (opt && m.lastTs < timeAnchorSecs - opt.secs) return false;
-    } else if (filterDate) {
-      const marketDate = new Date(m.lastTs * 1000).toISOString().slice(0, 10);
-      if (marketDate !== filterDate) return false;
+    } else if (filterDateFrom || filterDateTo) {
+      const marketDate = getMarketDateKey(m.lastTs);
+      if (filterDateFrom && marketDate < filterDateFrom) return false;
+      if (filterDateTo && marketDate > filterDateTo) return false;
     }
     return true;
-  }), [markets, filter, timeFilter, timeAnchorSecs, filterDate]);
+  }), [markets, filter, timeFilter, timeAnchorSecs, filterDateFrom, filterDateTo]);
 
   const {
     coins,
@@ -723,6 +744,16 @@ export default function App() {
     streakLabel,
     walletBalance,
   } = useMemo(() => getDashboardStats(filtered, allTrades), [filtered, allTrades]);
+
+  const hasDateRange = timeFilter === "all" && Boolean(filterDateFrom || filterDateTo);
+  const isTodayRange = filterDateFrom === defaultDate && filterDateTo === defaultDate;
+  const dateRangeLabel = isTodayRange
+    ? "Hoy"
+    : filterDateFrom && filterDateTo
+      ? `${filterDateFrom} a ${filterDateTo}`
+      : filterDateFrom
+        ? `Desde ${filterDateFrom}`
+        : `Hasta ${filterDateTo}`;
 
   return (
     <div className="app">
@@ -962,19 +993,27 @@ export default function App() {
 
           {/* ── Date filter ── */}
           <div style={{ margin:"0 0 8px 0", display:"flex", alignItems:"center", flexWrap:"wrap", gap:8 }}>
-            <label htmlFor="filter-date" style={{ fontSize:12, color:"#64748b" }}>📅 Fecha exacta:</label>
-            <input id="filter-date" type="date" value={filterDate}
-              onChange={e => selectDate(e.target.value)}
+            <span style={{ fontSize:12, color:"#64748b" }}>Fecha:</span>
+            <label htmlFor="filter-date-from" style={{ fontSize:11, color:"#475569" }}>Desde</label>
+            <input id="filter-date-from" type="date" value={filterDateFrom}
+              onChange={e => selectDateFrom(e.target.value)}
               style={{ fontSize:12, padding:"2px 8px", background:"#1a1f2e", border:"1px solid #1e2535", borderRadius:6, color:"#e2e8f0" }}
+              max={filterDateTo || defaultDate} />
+            <label htmlFor="filter-date-to" style={{ fontSize:11, color:"#475569" }}>Hasta</label>
+            <input id="filter-date-to" type="date" value={filterDateTo}
+              onChange={e => selectDateTo(e.target.value)}
+              style={{ fontSize:12, padding:"2px 8px", background:"#1a1f2e", border:"1px solid #1e2535", borderRadius:6, color:"#e2e8f0" }}
+              min={filterDateFrom || undefined}
               max={defaultDate} />
-            {filterDate && (
-              <button onClick={() => { setFilterDate(""); setTimeFilter("all"); }}
-                style={{ fontSize:12, background:"none", border:"none", color:"#64748b", cursor:"pointer" }}>✕</button>
+            {(filterDateFrom || filterDateTo) && (
+              <button onClick={clearDateRange}
+                title="Quitar rango de fechas"
+                style={{ fontSize:12, background:"none", border:"none", color:"#64748b", cursor:"pointer" }}>x</button>
             )}
           </div>
 
           {/* Active filter badges */}
-          {(filter !== "all" || timeFilter !== "all" || (filterDate && filterDate !== defaultDate)) && (
+          {(filter !== "all" || timeFilter !== "all" || hasDateRange) && (
             <div style={{ margin:"6px 0 14px 0", display:"flex", gap:8, flexWrap:"wrap" }}>
               {filter !== "all" && (
                 <span style={{ background:"#1e2535", color:"#60a5fa", borderRadius:4, padding:"2px 8px", fontSize:11 }}>
@@ -986,14 +1025,9 @@ export default function App() {
                   🕐 Últimas {TIME_OPTIONS_BY_KEY.get(timeFilter)?.label}
                 </span>
               )}
-              {filterDate && timeFilter === "all" && filterDate !== defaultDate && (
+              {hasDateRange && (
                 <span style={{ background:"#1e2535", color:"#fbbf24", borderRadius:4, padding:"2px 8px", fontSize:11 }}>
-                  📅 {filterDate}
-                </span>
-              )}
-              {filterDate && timeFilter === "all" && filterDate === defaultDate && (
-                <span style={{ background:"#1e2535", color:"#fbbf24", borderRadius:4, padding:"2px 8px", fontSize:11 }}>
-                  📅 Hoy
+                  Fecha: {dateRangeLabel}
                 </span>
               )}
               <span style={{ color:"#334155", fontSize:11, alignSelf:"center" }}>

@@ -463,6 +463,43 @@ async function fetchPolymarketTrades(wallet, { signal, onPage } = {}) {
   throw new Error(`Historico incompleto: limite de seguridad alcanzado con ${allTrades.length} trades`);
 }
 
+async function fetchPolymarketTradesForDate(wallet, dateKey, { signal, onPage } = {}) {
+  const allTrades = [];
+  const seenPages = new Set();
+  let offset = 0;
+
+  for (let page = 1; page <= MAX_TRADE_PAGES; page++) {
+    const params = new URLSearchParams({
+      user: wallet,
+      limit: String(TRADE_PAGE_LIMIT),
+      offset: String(offset),
+      takerOnly: "false",
+    });
+    const res = await fetch(`/api/polymarket/trades?${params}`, { signal });
+    if (!res.ok) throw new Error(`Polymarket API HTTP ${res.status} en offset ${offset}`);
+
+    const payload = await res.json();
+    const pageTrades = getTradesFromPayload(payload);
+    if (!pageTrades) throw new Error("Respuesta inesperada de Polymarket API");
+
+    const fingerprint = getPageFingerprint(pageTrades);
+    if (pageTrades.length > 0 && seenPages.has(fingerprint)) {
+      throw new Error(`Polymarket API devolvio una pagina repetida en offset ${offset}`);
+    }
+    seenPages.add(fingerprint);
+
+    const dateTrades = pageTrades.filter(trade => getMarketDateKey(Number(trade.timestamp) || 0) === dateKey);
+    allTrades.push(...dateTrades);
+    onPage?.({ page, loaded: allTrades.length });
+
+    const hasOlderTrades = pageTrades.some(trade => getMarketDateKey(Number(trade.timestamp) || 0) < dateKey);
+    if (pageTrades.length < TRADE_PAGE_LIMIT || hasOlderTrades) return allTrades;
+    offset += TRADE_PAGE_LIMIT;
+  }
+
+  throw new Error(`Historico diario incompleto: limite de seguridad alcanzado con ${allTrades.length} trades`);
+}
+
 async function fetchClosedPositionsByWallet(wallet, conditionIds, { signal, onBatch } = {}) {
   if (conditionIds.length === 0) return [];
 
@@ -571,6 +608,10 @@ function getMarketDateKey(timestampSecs) {
   return getDateInputValue(new Date(timestampSecs * 1000));
 }
 
+function filterTradesByDate(trades, dateKey) {
+  return trades.filter(trade => getMarketDateKey(Number(trade.timestamp) || 0) === dateKey);
+}
+
 
 export default function App() {
   const [selectedWalletKey, setSelectedWalletKey] = useState(DEFAULT_WALLET_OPTION.key);
@@ -585,6 +626,7 @@ export default function App() {
   const [summaryOpen,  setSummaryOpen]  = useState(false);
   const [timeFilter, setTimeFilter] = useState("all");
   const [timeAnchorSecs, setTimeAnchorSecs] = useState(0);
+  const [dataScope, setDataScope] = useState("today");
 
   // ── Trades manuales (cargados desde /manual-trades.json) ──
   const [manualTrades, setManualTrades] = useState([]);
@@ -637,8 +679,9 @@ export default function App() {
     [selectedWalletKey],
   );
 
-  const load = useCallback(async (addr, { initial = false } = {}) => {
+  const load = useCallback(async (addr, { initial = false, scope = "today" } = {}) => {
     const wallet = normalizeWallet(addr);
+    const todayKey = getDateInputValue();
     const requestId = loadSeqRef.current + 1;
     loadSeqRef.current = requestId;
     loadAbortRef.current?.abort();
@@ -649,34 +692,47 @@ export default function App() {
       setLoading(true);
       setError(null);
     }
-    setLoadStatus("Cargando historico de trades...");
+    const isHistory = scope === "history";
+    setDataScope(scope);
+    setLoadStatus(isHistory ? "Cargando historico de trades..." : "Cargando trades de hoy...");
     try {
       const [apiTrades, repoTrades] = await Promise.all([
-        fetchPolymarketTrades(wallet, {
-          signal: controller.signal,
-          onPage: ({ page, loaded }) => {
-            if (loadSeqRef.current === requestId) {
-              setLoadStatus(`Cargando historico: ${loaded} trades en ${page} paginas...`);
-            }
-          },
-        }),
+        isHistory
+          ? fetchPolymarketTrades(wallet, {
+            signal: controller.signal,
+            onPage: ({ page, loaded }) => {
+              if (loadSeqRef.current === requestId) {
+                setLoadStatus(`Cargando historico: ${loaded} trades en ${page} paginas...`);
+              }
+            },
+          })
+          : fetchPolymarketTradesForDate(wallet, todayKey, {
+            signal: controller.signal,
+            onPage: ({ page, loaded }) => {
+              if (loadSeqRef.current === requestId) {
+                setLoadStatus(`Cargando hoy: ${loaded} trades en ${page} paginas...`);
+              }
+            },
+          }),
         fetchManualFromRepo(),
       ]);
       const walletManualTrades = getManualTradesForWallet(wallet, repoTrades);
-      const conditionIds = getUniqueConditionIds([...apiTrades, ...walletManualTrades]);
-      setLoadStatus(`Cargando resultados oficiales: 0/${conditionIds.length} mercados...`);
-      const apiClosedPositions = await fetchPolymarketClosedPositions(wallet, conditionIds, {
-        signal: controller.signal,
-        onBatch: ({ page, loaded, mode, batch, batches }) => {
-          if (loadSeqRef.current === requestId) {
-            const sourceLabel = mode === "markets" ? `fallback ${batch}/${batches}` : `${page} paginas`;
-            setLoadStatus(`Cargando resultados oficiales: ${loaded} posiciones en ${sourceLabel}...`);
-          }
-        },
-      });
+      const scopedManualTrades = isHistory ? walletManualTrades : filterTradesByDate(walletManualTrades, todayKey);
+      const conditionIds = getUniqueConditionIds([...apiTrades, ...scopedManualTrades]);
+      const apiClosedPositions = isHistory
+        ? await fetchPolymarketClosedPositions(wallet, conditionIds, {
+          signal: controller.signal,
+          onBatch: ({ page, loaded, mode, batch, batches }) => {
+            if (loadSeqRef.current === requestId) {
+              const sourceLabel = mode === "markets" ? `fallback ${batch}/${batches}` : `${page} paginas`;
+              setLoadStatus(`Cargando resultados oficiales: ${loaded} posiciones en ${sourceLabel}...`);
+            }
+          },
+        })
+        : [];
       if (loadSeqRef.current !== requestId) return;
       setTrades(Array.isArray(apiTrades) ? apiTrades : []);
-      setManualTrades(walletManualTrades);
+      setManualTrades(scopedManualTrades);
       setClosedPositions(apiClosedPositions);
     } catch (e) {
       if (e.name !== "AbortError" && loadSeqRef.current === requestId) {
@@ -693,7 +749,7 @@ export default function App() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      void load(DEFAULT_WALLET, { initial: true });
+      void load(DEFAULT_WALLET, { initial: true, scope: "today" });
     }, 0);
     return () => {
       clearTimeout(timer);
@@ -704,7 +760,11 @@ export default function App() {
   function selectWallet(key) {
     const walletOption = WALLET_OPTIONS.find(option => option.key === key) || DEFAULT_WALLET_OPTION;
     setSelectedWalletKey(walletOption.key);
-    void load(walletOption.address);
+    void load(walletOption.address, { scope: "today" });
+  }
+
+  function loadFullHistory() {
+    void load(selectedWallet.address, { scope: "history" });
   }
 
   const markets  = useMemo(() => groupByMarket(allTrades, closedPositions), [allTrades, closedPositions]);
@@ -782,6 +842,24 @@ export default function App() {
           <span className="wallet-address" title={selectedWallet.address}>
             {selectedWallet.address}
           </span>
+          <button
+            onClick={loadFullHistory}
+            disabled={loading || dataScope === "history"}
+            title="Cargar todos los trades historicos de esta wallet"
+            style={{
+              background: dataScope === "history" ? "#0f172a" : "#2563eb22",
+              border: `1px solid ${dataScope === "history" ? "#1e2535" : "#2563eb88"}`,
+              borderRadius: 6,
+              color: dataScope === "history" ? "#64748b" : "#93c5fd",
+              cursor: loading || dataScope === "history" ? "default" : "pointer",
+              fontSize: 12,
+              fontWeight: 700,
+              padding: "6px 10px",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {dataScope === "history" ? "Historico cargado" : "Generar historico"}
+          </button>
         </div>
       </header>
 
@@ -1309,7 +1387,9 @@ export default function App() {
       )}
 
       {!loading && !error && allTrades.length === 0 && (
-        <div className="state">No hay trades para esta wallet</div>
+        <div className="state">
+          {dataScope === "today" ? "No hay trades de hoy para esta wallet" : "No hay trades para esta wallet"}
+        </div>
       )}
     </div>
   );

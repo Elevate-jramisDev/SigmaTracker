@@ -719,17 +719,15 @@ export default function App() {
       const walletManualTrades = getManualTradesForWallet(wallet, repoTrades);
       const scopedManualTrades = isHistory ? walletManualTrades : filterTradesByDate(walletManualTrades, todayKey);
       const conditionIds = getUniqueConditionIds([...apiTrades, ...scopedManualTrades]);
-      const apiClosedPositions = isHistory
-        ? await fetchPolymarketClosedPositions(wallet, conditionIds, {
-          signal: controller.signal,
-          onBatch: ({ page, loaded, mode, batch, batches }) => {
-            if (loadSeqRef.current === requestId) {
-              const sourceLabel = mode === "markets" ? `fallback ${batch}/${batches}` : `${page} paginas`;
-              setLoadStatus(`Cargando resultados oficiales: ${loaded} posiciones en ${sourceLabel}...`);
-            }
-          },
-        })
-        : [];
+      const apiClosedPositions = await fetchPolymarketClosedPositions(wallet, conditionIds, {
+        signal: controller.signal,
+        onBatch: ({ page, loaded, mode, batch, batches }) => {
+          if (loadSeqRef.current === requestId) {
+            const sourceLabel = mode === "markets" ? `fallback ${batch}/${batches}` : `${page} paginas`;
+            setLoadStatus(`Cargando resultados oficiales: ${loaded} posiciones en ${sourceLabel}...`);
+          }
+        },
+      });
       if (loadSeqRef.current !== requestId) return;
       setTrades(Array.isArray(apiTrades) ? apiTrades : []);
       setManualTrades(scopedManualTrades);
